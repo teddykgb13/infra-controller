@@ -926,6 +926,23 @@ pub async fn update_metadata(
     }
 }
 
+/// Set or clear the operator pinned Redfish BMC vendor override for a machine.
+/// Passing None clears it.
+pub async fn update_bmc_vendor_override(
+    txn: &mut PgConnection,
+    machine_id: &MachineId,
+    bmc_vendor_override: Option<String>,
+) -> Result<(), DatabaseError> {
+    let query = "UPDATE machines SET bmc_vendor_override = $1 WHERE id = $2";
+    sqlx::query(query)
+        .bind(bmc_vendor_override)
+        .bind(machine_id)
+        .execute(txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?;
+    Ok(())
+}
+
 /// Only does the update if the passed observation is newer than any existing one
 pub async fn update_network_status_observation(
     txn: &mut PgConnection,

@@ -51,6 +51,7 @@ Print help (see a summary with -h)
 | [`hardware-info`](./machine-hardware-info.md) | Update/show machine hardware info |
 | [`positions`](./machine-positions.md) | Show physical location info for machines in rack-based systems |
 | [`nvlink-info`](./machine-nvlink-info.md) | Update/show NVLink info for an MNNVL machine |
+| [`vendor-override`](./machine-vendor-override.md) | Pin or clear the Redfish BMC vendor override for a machine |
 
 ---
 

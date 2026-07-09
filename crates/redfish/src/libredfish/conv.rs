@@ -168,6 +168,34 @@ pub fn bmc_vendor(r: libredfish::model::service_root::RedfishVendor) -> BMCVendo
     }
 }
 
+/// Parse a vendor name into libredfish's RedfishVendor via its own Deserialize
+/// so NICo keeps no vendor list. Returns None when the name matches no variant.
+pub fn redfish_vendor_from_str(
+    name: &str,
+) -> Option<libredfish::model::service_root::RedfishVendor> {
+    use serde::Deserialize;
+    let de = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(name);
+    libredfish::model::service_root::RedfishVendor::deserialize(de).ok()
+}
+
+/// Resolve a stored override string into a forced RedfishVendor. None or empty
+/// means no override, and an unknown name warns (host labels the log) and returns None.
+pub fn redfish_vendor_override(
+    host: &str,
+    raw: Option<&str>,
+) -> Option<libredfish::model::service_root::RedfishVendor> {
+    let name = raw.filter(|s| !s.is_empty())?;
+    let vendor = redfish_vendor_from_str(name);
+    if vendor.is_none() {
+        tracing::warn!(
+            bmc = %host,
+            bmc_vendor_override = %name,
+            "bmc_vendor_override matches no known Redfish vendor, using automatic detection"
+        );
+    }
+    vendor
+}
+
 impl IntoModel<CaCertificate> for libredfish::model::component_integrity::CaCertificate {
     fn into_model(self) -> CaCertificate {
         CaCertificate {
@@ -191,5 +219,39 @@ impl IntoModel<Evidence> for libredfish::model::component_integrity::Evidence {
             signing_algorithm: self.signing_algorithm,
             version: self.version,
         }
+    }
+}
+
+#[cfg(test)]
+mod vendor_override_tests {
+    use libredfish::model::service_root::RedfishVendor;
+
+    use super::{redfish_vendor_from_str, redfish_vendor_override};
+
+    #[test]
+    fn parses_known_variant_names() {
+        assert_eq!(redfish_vendor_from_str("Dell"), Some(RedfishVendor::Dell));
+        assert_eq!(
+            redfish_vendor_from_str("NvidiaDpu"),
+            Some(RedfishVendor::NvidiaDpu)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_or_miscased_names() {
+        assert_eq!(redfish_vendor_from_str("dell"), None);
+        assert_eq!(redfish_vendor_from_str("NotARealVendor"), None);
+        assert_eq!(redfish_vendor_from_str(""), None);
+    }
+
+    #[test]
+    fn override_helper_handles_empty_and_unmatched() {
+        assert_eq!(redfish_vendor_override("bmc", None), None);
+        assert_eq!(redfish_vendor_override("bmc", Some("")), None);
+        assert_eq!(
+            redfish_vendor_override("bmc", Some("Dell")),
+            Some(RedfishVendor::Dell)
+        );
+        assert_eq!(redfish_vendor_override("bmc", Some("bogus")), None);
     }
 }

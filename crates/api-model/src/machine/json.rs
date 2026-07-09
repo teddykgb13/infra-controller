@@ -91,6 +91,8 @@ pub struct MachineSnapshotPgJson {
     pub interfaces: Vec<MachineInterfaceSnapshot>,
     pub topology: Vec<MachineTopology>,
     pub bmc_info: BmcInfo,
+    #[serde(default)]
+    pub bmc_vendor_override: Option<String>,
     pub labels: HashMap<String, String>,
     pub name: String,
     pub description: String,
@@ -181,6 +183,7 @@ impl TryFrom<MachineSnapshotPgJson> for Machine {
             interfaces: value.interfaces,
             hardware_info,
             bmc_info: value.bmc_info,
+            bmc_vendor_override: value.bmc_vendor_override,
             last_reboot_time: value.last_reboot_time,
             last_cleanup_time: value.last_cleanup_time,
             last_discovery_time: value.last_discovery_time,

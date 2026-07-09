@@ -434,17 +434,28 @@ pub async fn lookup_bmc_access_info(
     ip: IpAddr,
     port: Option<u16>,
 ) -> DatabaseResult<BmcAccessInfo> {
-    let mac_address = find_by_ip(db, ip)
-        .await?
-        .ok_or_else(|| DatabaseError::NotFoundError {
-            kind: "Machine Interface",
-            id: ip.to_string(),
-        })?
-        .mac_address;
+    // Resolve the BMC interface MAC and the owning machine's vendor override in
+    // one query so every client_by_info caller can act on the override.
+    let query = r"SELECT mi.mac_address, m.bmc_vendor_override
+        FROM machine_interface_addresses mia
+        INNER JOIN machine_interfaces mi ON mi.id = mia.interface_id
+        LEFT JOIN machines m ON m.id = mi.machine_id
+        WHERE mia.address = $1::inet
+        LIMIT 1";
+    let row: Option<(MacAddress, Option<String>)> = sqlx::query_as(query)
+        .bind(ip)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?;
+    let (mac_address, bmc_vendor_override) = row.ok_or_else(|| DatabaseError::NotFoundError {
+        kind: "Machine Interface",
+        id: ip.to_string(),
+    })?;
     Ok(BmcAccessInfo {
         host: ip.to_string(),
         port,
         mac_address,
+        bmc_vendor_override,
     })
 }
 

@@ -781,6 +781,10 @@ pub struct Machine {
     /// The BMC info for this machine
     pub bmc_info: BmcInfo,
 
+    /// Operator pinned Redfish vendor for this machine, a RedfishVendor variant name.
+    /// None means automatic detection.
+    pub bmc_vendor_override: Option<String>,
+
     /// Last time when machine came up.
     pub last_reboot_time: Option<DateTime<Utc>>,
 

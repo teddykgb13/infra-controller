@@ -1180,6 +1180,13 @@ impl Forge for Api {
         crate::handlers::machine::update_machine_metadata(self, request).await
     }
 
+    async fn update_machine_bmc_vendor_override(
+        &self,
+        request: Request<rpc::MachineBmcVendorOverrideUpdateRequest>,
+    ) -> std::result::Result<Response<()>, Status> {
+        crate::handlers::machine::update_machine_bmc_vendor_override(self, request).await
+    }
+
     async fn update_rack_metadata(
         &self,
         request: Request<rpc::RackMetadataUpdateRequest>,

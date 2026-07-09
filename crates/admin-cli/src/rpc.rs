@@ -2139,6 +2139,18 @@ impl ApiClient {
         Ok(self.0.update_machine_metadata(request).await?)
     }
 
+    pub async fn update_machine_bmc_vendor_override(
+        &self,
+        machine_id: MachineId,
+        bmc_vendor_override: Option<String>,
+    ) -> CarbideCliResult<()> {
+        let request = ::rpc::forge::MachineBmcVendorOverrideUpdateRequest {
+            machine_id: Some(machine_id),
+            bmc_vendor_override,
+        };
+        Ok(self.0.update_machine_bmc_vendor_override(request).await?)
+    }
+
     pub async fn update_rack_metadata(
         &self,
         rack_id: RackId,

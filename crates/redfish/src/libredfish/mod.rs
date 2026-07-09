@@ -97,11 +97,13 @@ pub trait RedfishClientPool: Send + Sync + 'static {
         &self,
         access: &BmcAccessInfo,
     ) -> Result<Box<dyn Redfish>, RedfishClientCreationError> {
+        let vendor =
+            conv::redfish_vendor_override(&access.host, access.bmc_vendor_override.as_deref());
         self.create_client(
             &access.host,
             access.port,
             RedfishAuth::for_bmc_mac(access.mac_address),
-            None,
+            vendor,
         )
         .await
     }

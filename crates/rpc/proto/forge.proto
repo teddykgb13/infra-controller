@@ -342,6 +342,9 @@ service Forge {
   // Update the Metadata of a Machine
   rpc UpdateMachineMetadata(MachineMetadataUpdateRequest) returns (google.protobuf.Empty);
 
+  // Pin or clear the Redfish BMC vendor override of a Machine
+  rpc UpdateMachineBmcVendorOverride(MachineBmcVendorOverrideUpdateRequest) returns (google.protobuf.Empty);
+
   // Update the Metadata of a Rack
   rpc UpdateRackMetadata(RackMetadataUpdateRequest) returns (google.protobuf.Empty);
 
@@ -3735,6 +3738,11 @@ message Machine {
   optional string last_scout_observed_version = 48;
 
   optional DpfMachineState dpf = 49;
+
+  // Operator pinned Redfish BMC vendor for this machine. When set, it is passed
+  // to libredfish as the forced vendor instead of detection from the service
+  // root. Empty means automatic detection. Holds a RedfishVendor variant name.
+  optional string bmc_vendor_override = 50;
 }
 
 message DpfMachineState {
@@ -3775,6 +3783,15 @@ message MachineMetadataUpdateRequest {
 
   // New Metadata to be utilized by the Machine
   Metadata metadata = 3;
+}
+
+// Pins or clears the Redfish BMC vendor override stored on a Machine
+message MachineBmcVendorOverrideUpdateRequest {
+  // The ID of the Machine for which the override will apply
+  common.MachineId machine_id = 1;
+
+  // RedfishVendor variant name to force. Empty or unset clears the override.
+  optional string bmc_vendor_override = 2;
 }
 
 message RackMetadataUpdateRequest {

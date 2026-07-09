@@ -27,6 +27,7 @@ pub mod nvlink_info;
 pub mod positions;
 pub mod reboot;
 pub mod show;
+pub mod vendor_override;
 
 #[cfg(test)]
 mod tests;
@@ -89,4 +90,9 @@ pub enum Cmd {
     Positions(positions::Args),
     #[clap(subcommand, about = "Update/show NVLink info for an MNNVL machine")]
     NvlinkInfo(nvlink_info::Args),
+    #[clap(
+        subcommand,
+        about = "Pin or clear the Redfish BMC vendor override for a machine"
+    )]
+    VendorOverride(vendor_override::Args),
 }

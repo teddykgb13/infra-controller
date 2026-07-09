@@ -1084,6 +1084,10 @@ pub(crate) async fn invoke_power(
     // but instead queue it for the state handler. That will avoid racing
     // with other internal reboot requests from the state handler.
     let bmc_ip = bmc_ip.to_string();
+    let vendor_override = carbide_redfish::libredfish::conv::redfish_vendor_override(
+        &bmc_ip,
+        snapshot.host_snapshot.bmc_vendor_override.as_deref(),
+    );
     let client = api
         .redfish_pool
         .create_client(
@@ -1092,7 +1096,7 @@ pub(crate) async fn invoke_power(
             RedfishAuth::Key(CredentialKey::BmcCredentials {
                 credential_type: BmcCredentialType::BmcRoot { bmc_mac_address },
             }),
-            None,
+            vendor_override,
         )
         .await
         .map_err(|e| CarbideError::internal(e.to_string()))?;

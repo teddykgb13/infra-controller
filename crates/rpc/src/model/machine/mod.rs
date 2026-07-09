@@ -346,6 +346,7 @@ impl From<Machine> for rpc::forge::Machine {
                 tray_index: machine.tray_index,
             }),
             last_scout_observed_version: machine.last_scout_observed_version,
+            bmc_vendor_override: machine.bmc_vendor_override,
             dpf,
         }
     }

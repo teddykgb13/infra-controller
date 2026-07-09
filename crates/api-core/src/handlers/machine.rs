@@ -302,6 +302,40 @@ pub(crate) async fn update_machine_metadata(
     Ok(tonic::Response::new(()))
 }
 
+pub(crate) async fn update_machine_bmc_vendor_override(
+    api: &Api,
+    request: Request<rpc::MachineBmcVendorOverrideUpdateRequest>,
+) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+    log_request_data(&request);
+    let request = request.into_inner();
+    let machine_id = convert_and_log_machine_id(request.machine_id.as_ref())?;
+
+    let mut txn = api.txn_begin().await?;
+    if db::machine::find_one(&mut txn, &machine_id, MachineSearchConfig::default())
+        .await?
+        .is_none()
+    {
+        return Err(CarbideError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        }
+        .into());
+    }
+
+    // Store the override as a plain string, empty or absent clears it. libredfish
+    // matches the vendor when the client is built, so the API keeps no vendor list.
+    let bmc_vendor_override = match request.bmc_vendor_override {
+        Some(name) if !name.is_empty() => Some(name),
+        _ => None,
+    };
+
+    db::machine::update_bmc_vendor_override(&mut txn, &machine_id, bmc_vendor_override).await?;
+
+    txn.commit().await?;
+
+    Ok(tonic::Response::new(()))
+}
+
 pub(crate) async fn admin_force_delete_machine(
     api: &Api,
     request: Request<rpc::AdminForceDeleteMachineRequest>,
@@ -472,6 +506,11 @@ pub(crate) async fn admin_force_delete_machine(
                     "BMC IP and MAC address for machine was found. Trying to perform Bios unlock",
                 );
 
+                let vendor_override = carbide_redfish::libredfish::conv::redfish_vendor_override(
+                    &ip_address,
+                    machine.bmc_vendor_override.as_deref(),
+                );
+
                 match api
                     .redfish_pool
                     .create_client(
@@ -480,7 +519,7 @@ pub(crate) async fn admin_force_delete_machine(
                         RedfishAuth::Key(CredentialKey::BmcCredentials {
                             credential_type: BmcCredentialType::BmcRoot { bmc_mac_address },
                         }),
-                        None,
+                        vendor_override,
                     )
                     .await
                 {

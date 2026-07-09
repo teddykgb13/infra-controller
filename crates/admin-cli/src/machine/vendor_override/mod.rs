@@ -15,17 +15,18 @@
  * limitations under the License.
  */
 
-use mac_address::MacAddress;
+pub mod args;
+pub mod cmd;
 
-/// Data needed to access BMC via Redfish.
-///
-/// It is regular host, port pair + MAC address that identifies auth
-/// key identifier for the access.
-pub struct BmcAccessInfo {
-    pub host: String,
-    pub port: Option<u16>,
-    pub mac_address: MacAddress,
-    /// Operator pinned Redfish vendor for this BMC, a RedfishVendor variant
-    /// name. None means automatic detection.
-    pub bmc_vendor_override: Option<String>,
+pub use args::Args;
+
+use crate::cfg::run::Run;
+use crate::cfg::runtime::RuntimeContext;
+use crate::errors::CarbideCliResult;
+
+impl Run for Args {
+    async fn run(self, ctx: &mut RuntimeContext) -> CarbideCliResult<()> {
+        cmd::vendor_override(&ctx.api_client, self).await?;
+        Ok(())
+    }
 }

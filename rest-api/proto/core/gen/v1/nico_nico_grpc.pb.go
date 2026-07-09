@@ -179,6 +179,7 @@ const (
 	Forge_AdminListResourcePools_FullMethodName                             = "/forge.Forge/AdminListResourcePools"
 	Forge_AdminGrowResourcePool_FullMethodName                              = "/forge.Forge/AdminGrowResourcePool"
 	Forge_UpdateMachineMetadata_FullMethodName                              = "/forge.Forge/UpdateMachineMetadata"
+	Forge_UpdateMachineBmcVendorOverride_FullMethodName                     = "/forge.Forge/UpdateMachineBmcVendorOverride"
 	Forge_UpdateRackMetadata_FullMethodName                                 = "/forge.Forge/UpdateRackMetadata"
 	Forge_UpdateSwitchMetadata_FullMethodName                               = "/forge.Forge/UpdateSwitchMetadata"
 	Forge_UpdatePowerShelfMetadata_FullMethodName                           = "/forge.Forge/UpdatePowerShelfMetadata"
@@ -765,6 +766,8 @@ type ForgeClient interface {
 	AdminGrowResourcePool(ctx context.Context, in *GrowResourcePoolRequest, opts ...grpc.CallOption) (*GrowResourcePoolResponse, error)
 	// Update the Metadata of a Machine
 	UpdateMachineMetadata(ctx context.Context, in *MachineMetadataUpdateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// Pin or clear the Redfish BMC vendor override of a Machine
+	UpdateMachineBmcVendorOverride(ctx context.Context, in *MachineBmcVendorOverrideUpdateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Update the Metadata of a Rack
 	UpdateRackMetadata(ctx context.Context, in *RackMetadataUpdateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Update the Metadata of a Switch
@@ -2865,6 +2868,16 @@ func (c *forgeClient) UpdateMachineMetadata(ctx context.Context, in *MachineMeta
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Forge_UpdateMachineMetadata_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *forgeClient) UpdateMachineBmcVendorOverride(ctx context.Context, in *MachineBmcVendorOverrideUpdateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Forge_UpdateMachineBmcVendorOverride_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -6221,6 +6234,8 @@ type ForgeServer interface {
 	AdminGrowResourcePool(context.Context, *GrowResourcePoolRequest) (*GrowResourcePoolResponse, error)
 	// Update the Metadata of a Machine
 	UpdateMachineMetadata(context.Context, *MachineMetadataUpdateRequest) (*emptypb.Empty, error)
+	// Pin or clear the Redfish BMC vendor override of a Machine
+	UpdateMachineBmcVendorOverride(context.Context, *MachineBmcVendorOverrideUpdateRequest) (*emptypb.Empty, error)
 	// Update the Metadata of a Rack
 	UpdateRackMetadata(context.Context, *RackMetadataUpdateRequest) (*emptypb.Empty, error)
 	// Update the Metadata of a Switch
@@ -7226,6 +7241,9 @@ func (UnimplementedForgeServer) AdminGrowResourcePool(context.Context, *GrowReso
 }
 func (UnimplementedForgeServer) UpdateMachineMetadata(context.Context, *MachineMetadataUpdateRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateMachineMetadata not implemented")
+}
+func (UnimplementedForgeServer) UpdateMachineBmcVendorOverride(context.Context, *MachineBmcVendorOverrideUpdateRequest) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateMachineBmcVendorOverride not implemented")
 }
 func (UnimplementedForgeServer) UpdateRackMetadata(context.Context, *RackMetadataUpdateRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateRackMetadata not implemented")
@@ -10972,6 +10990,24 @@ func _Forge_UpdateMachineMetadata_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ForgeServer).UpdateMachineMetadata(ctx, req.(*MachineMetadataUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Forge_UpdateMachineBmcVendorOverride_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MachineBmcVendorOverrideUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ForgeServer).UpdateMachineBmcVendorOverride(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Forge_UpdateMachineBmcVendorOverride_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ForgeServer).UpdateMachineBmcVendorOverride(ctx, req.(*MachineBmcVendorOverrideUpdateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -17121,6 +17157,10 @@ var Forge_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateMachineMetadata",
 			Handler:    _Forge_UpdateMachineMetadata_Handler,
+		},
+		{
+			MethodName: "UpdateMachineBmcVendorOverride",
+			Handler:    _Forge_UpdateMachineBmcVendorOverride_Handler,
 		},
 		{
 			MethodName: "UpdateRackMetadata",
