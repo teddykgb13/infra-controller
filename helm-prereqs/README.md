@@ -43,7 +43,7 @@ helm-prereqs/
 │   ├── nico-site-agent.yaml     # Site-agent deployment values (DB config, gRPC settings)
 │   └── metallb-config.yaml     # MetalLB IP pools, BGP peers, and advertisements
 ├── templates/                  # nico-prereqs Helm chart templates (PKI, ESO, PostgreSQL)
-├── operators/                  # Raw manifests and operator values (local-path, MetalLB, cert-manager, Vault, ESO)
+├── operators/                  # Raw manifests and operator values (local-path, MetalLB, ingress-nginx, cert-manager, Vault, ESO)
 └── keycloak/                   # Dev Keycloak deployment and token helper scripts
 ```
 
@@ -104,6 +104,7 @@ The tables below summarize the keys that must be set per site.
 | `NICO_SITE_UUID` | No | Stable UUID for this site. If unset, `setup.sh` tries to reuse the UUID from a prior install (site-agent ConfigMap). If that fails, it adopts an existing REST site with the same name, or mints a UUID and seeds the site record itself. |
 | `NICO_MANAGE_DEFAULT_STORAGE_CLASS` | No | Whether `setup.sh` marks `local-path` as the default StorageClass. Defaults to `true`. Set to `false` when the cluster already has an operator-managed default StorageClass. |
 | `NICO_STORAGE_CLASS` | No | StorageClass used by Vault data/audit PVCs. Defaults to `local-path-persistent`. |
+| `NICO_INSTALL_INGRESS_NGINX` | No | Install the optional ingress-nginx controller after MetalLB. Defaults to `false`; set to `true` only when the cluster does not already provide an ingress controller. |
 | `PREFLIGHT_CHECK_IMAGE` | No | Image used for preflight per-node checks. Defaults to `busybox:1.36`; set to a local mirror for air-gapped clusters. |
 
 ### `values.yaml`
@@ -185,6 +186,7 @@ It supports these common deployment modes:
 | `--skip-core --skip-rest` | Infrastructure-only run; image tags, image registry, and REST repo are not required. |
 | `--core-values <file>` | Use site-specific Core values instead of `helm-prereqs/values/nico-core.yaml`. |
 | `--metallb-config <path>` | Use a site-specific MetalLB manifest file or kustomize directory. |
+| `--install-ingress-nginx` | Install the optional ingress-nginx controller. The controller Service is `LoadBalancer` and receives its external IP from MetalLB. |
 | `--site-overlay <dir>` | Apply a site kustomize overlay after Core deploys. |
 | `--debug` | Enable bash tracing. This can print secrets, so avoid it in shared logs. |
 

@@ -44,6 +44,8 @@
 #                          StorageClass. Default: true.
 #   NICO_STORAGE_CLASS     StorageClass for Postgres and Vault data and audit PVCs.
 #                          Default: local-path-persistent.
+#   NICO_INSTALL_INGRESS_NGINX
+#                          Install ingress-nginx after MetalLB. Default: false.
 #   VAULT_NS               Vault namespace. Default: vault
 #   CERT_MANAGER_NS        cert-manager namespace. Default: cert-manager
 #   PREFLIGHT_CHECK_IMAGE  Image for preflight per-node checks.
@@ -65,6 +67,7 @@
 #   ./setup.sh --skip-core --skip-rest  # fully non-interactive infra-only run
 #   ./setup.sh --core-values /path/to/values.yaml      # use site-specific values for Phase 6
 #   ./setup.sh --metallb-config /path/to/metallb.yaml  # use site-specific MetalLB config (file or kustomize dir)
+#   ./setup.sh --install-ingress-nginx # install optional nginx Ingress controller
 #   ./setup.sh --site-overlay /path/to/kustomize-dir   # kubectl apply -k after Phase 6 (NTP services, etc.)
 #   ./setup.sh --debug                  # enable bash -x trace (or run: bash -x ./setup.sh)
 #
@@ -83,6 +86,7 @@ AUTO_YES=false
 SKIP_CORE=false
 SKIP_REST=false
 SKIP_FLOW=false
+INSTALL_INGRESS_NGINX="${NICO_INSTALL_INGRESS_NGINX:-false}"
 CORE_VALUES=""
 METALLB_CONFIG=""
 SITE_OVERLAY=""
@@ -92,6 +96,7 @@ while [[ $# -gt 0 ]]; do
         --skip-core)    SKIP_CORE=true ;;
         --skip-rest)    SKIP_REST=true ;;
         --skip-flow)    SKIP_FLOW=true ;;
+        --install-ingress-nginx) INSTALL_INGRESS_NGINX=true ;;
         --debug)        set -x         ;;
         --core-values)
             [[ -z "${2:-}" ]] && { echo "Error: --core-values requires a file path"; exit 1; }
@@ -108,7 +113,7 @@ while [[ $# -gt 0 ]]; do
             SITE_OVERLAY="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
             [[ ! -d "${SITE_OVERLAY}" ]] && { echo "Error: --site-overlay directory not found: $2"; exit 1; }
             shift ;;
-        *) echo "Usage: $0 [-y] [--skip-core] [--skip-rest] [--skip-flow] [--core-values <file>] [--metallb-config <file-or-dir>] [--site-overlay <dir>] [--debug]"; exit 1 ;;
+        *) echo "Usage: $0 [-y] [--skip-core] [--skip-rest] [--skip-flow] [--install-ingress-nginx] [--core-values <file>] [--metallb-config <file-or-dir>] [--site-overlay <dir>] [--debug]"; exit 1 ;;
     esac
     shift
 done
@@ -126,6 +131,10 @@ VAULT_NS="${VAULT_NS:-vault}"
 CERT_MANAGER_NS="${CERT_MANAGER_NS:-cert-manager}"
 NICO_MANAGE_DEFAULT_STORAGE_CLASS="${NICO_MANAGE_DEFAULT_STORAGE_CLASS:-true}"
 NICO_STORAGE_CLASS="${NICO_STORAGE_CLASS:-local-path-persistent}"
+case "${INSTALL_INGRESS_NGINX}" in
+    true|false) ;;
+    *) echo "Error: NICO_INSTALL_INGRESS_NGINX must be true or false"; exit 1 ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Failure handler — offer to run clean.sh if setup exits with an error.
@@ -310,6 +319,24 @@ else
     kubectl apply -f "${SCRIPT_DIR}/values/metallb-config.yaml"
 fi
 echo "MetalLB ready"
+
+# ---------------------------------------------------------------------------
+# 1d. ingress-nginx — optional Ingress controller.
+#     Install after MetalLB so the controller LoadBalancer Service can receive
+#     an external address. Skip this when the cluster already has an Ingress
+#     controller or uses a different implementation.
+# ---------------------------------------------------------------------------
+if [[ "${INSTALL_INGRESS_NGINX}" == "true" ]]; then
+    _SETUP_PHASE="[1d] ingress-nginx"
+    echo "=== [1d] ingress-nginx ==="
+    helmfile sync -l name=ingress-nginx
+    echo "Waiting for ingress-nginx controller to be ready..."
+    kubectl wait --for=condition=Available deployment/ingress-nginx-controller \
+        -n ingress-nginx --timeout=120s
+    echo "ingress-nginx ready"
+else
+    echo "Skipping ingress-nginx (set NICO_INSTALL_INGRESS_NGINX=true or pass --install-ingress-nginx to install it)"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. cert-manager + Prometheus CRDs + Vault TLS bootstrap

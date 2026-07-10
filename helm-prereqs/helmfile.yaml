@@ -35,6 +35,8 @@ repositories:
     url: https://opensource.zalando.com/postgres-operator/charts/postgres-operator
   - name: metallb
     url: https://metallb.github.io/metallb
+  - name: ingress-nginx
+    url: https://kubernetes.github.io/ingress-nginx
 
 releases:
   # ---------------------------------------------------------------------------
@@ -54,6 +56,21 @@ releases:
     timeout: 600
     values:
       - operators/values/metallb.yaml
+
+  # ---------------------------------------------------------------------------
+  # ingress-nginx — optional Ingress controller for clusters that do not already
+  # provide one. setup.sh installs it only when requested; the controller Service
+  # uses type LoadBalancer and receives an address from MetalLB.
+  # ---------------------------------------------------------------------------
+  - name: ingress-nginx
+    namespace: ingress-nginx
+    createNamespace: true
+    chart: ingress-nginx/ingress-nginx
+    version: "4.12.1"
+    wait: true
+    timeout: 600
+    values:
+      - operators/values/ingress-nginx.yaml
 
   # ---------------------------------------------------------------------------
   # Zalando postgres-operator — manages nico-pg-cluster HA Patroni cluster.

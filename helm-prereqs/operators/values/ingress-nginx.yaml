@@ -1,0 +1,23 @@
+# =============================================================================
+# operators/values/ingress-nginx.yaml — ingress-nginx Helm chart static values
+#
+# Optional cluster-level Ingress controller for NICo REST ingress exposure.
+# The controller Service is type LoadBalancer and is expected to receive an
+# external IP from MetalLB.
+#
+# Chart: ingress-nginx/ingress-nginx 4.12.1
+# =============================================================================
+
+controller:
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: false
+    controllerValue: k8s.io/ingress-nginx
+  ingressClass: nginx
+  watchIngressWithoutClass: false
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Cluster
+  admissionWebhooks:
+    enabled: true

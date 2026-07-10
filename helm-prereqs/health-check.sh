@@ -106,6 +106,10 @@ if [[ -z "${METALLB_NS:-}" ]]; then
   METALLB_NS=$(kubectl get deployment metallb-controller -A \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || printf 'metallb-system')
 fi
+if [[ -z "${INGRESS_NGINX_NS:-}" ]]; then
+  INGRESS_NGINX_NS=$(kubectl get deployment ingress-nginx-controller -A \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
+fi
 
 printf "  %-26s %s\n" "NICo namespace:"     "${NICO_NS}"
 printf "  %-26s %s\n" "vault namespace:"       "${VAULT_NS}"
@@ -114,6 +118,7 @@ printf "  %-26s %s\n" "postgres namespace:"    "${POSTGRES_NS}"
 printf "  %-26s %s\n" "cert-manager ns:"       "${CERT_MANAGER_NS}"
 printf "  %-26s %s\n" "external-secrets ns:"   "${ESO_NS}"
 printf "  %-26s %s\n" "metallb ns:"            "${METALLB_NS}"
+printf "  %-26s %s\n" "ingress-nginx ns:"      "${INGRESS_NGINX_NS:-not installed}"
 
 # --------------------------------------------------------------------------
 # Test helpers
@@ -239,6 +244,14 @@ if [[ "${_desired}" -gt 0 && "${_ready}" -ge "${_desired}" ]]; then
   pass "daemonset/metallb-speaker: ${_ready}/${_desired} ready"
 else
   fail "daemonset/metallb-speaker: ${_ready:-0}/${_desired} ready"
+fi
+
+if [[ -n "${INGRESS_NGINX_NS:-}" ]]; then
+  section "ingress-nginx"
+  _check_deployment "${INGRESS_NGINX_NS}" ingress-nginx-controller
+else
+  section "ingress-nginx"
+  skip "not installed"
 fi
 
 # --------------------------------------------------------------------------

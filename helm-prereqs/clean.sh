@@ -21,10 +21,11 @@
 #   0. NCX stack           (nico-rest helm, temporal, keycloak, ncx postgres)
 #   1. nico core        (separate helm release, if installed)
 #   2. helmfile releases   (nico-prereqs, external-secrets, vault, cert-manager,
-#                           postgres-operator)
+#                           postgres-operator, ingress-nginx)
 #   3. cluster-scoped hook resources (ClusterIssuers, ClusterSecretStore, etc.)
 #   4. vault init secrets  (vault-cluster-keys, vaultunsealkeys, vaultroottoken)
-#   5. namespaces          (nico-system, cert-manager, vault, external-secrets, postgres)
+#   5. namespaces          (nico-system, cert-manager, vault, external-secrets,
+#                           postgres, ingress-nginx)
 #   6. local-path-persistent PVs owned by this stack (Retain policy — not deleted with namespace)
 #   7. local-path-provisioner + StorageClass (applied via kubectl, not helm-managed)
 # =============================================================================
@@ -68,7 +69,7 @@ helm uninstall nico -n nico-system 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 2. All helmfile releases in reverse dependency order:
-#    nico-prereqs → external-secrets → vault → cert-manager → metallb
+#    nico-prereqs → external-secrets → vault → cert-manager → ingress-nginx → metallb
 # ---------------------------------------------------------------------------
 echo "=== [2/8] Destroying helmfile releases ==="
 
@@ -153,6 +154,14 @@ kubectl get clusterrole,clusterrolebinding -o name \
     | grep nico-rest \
     | xargs kubectl delete --ignore-not-found 2>/dev/null || true
 
+# ingress-nginx cluster-scoped resources are normally removed by helm uninstall,
+# but remove stragglers so clean.sh can recover from partial installs.
+echo "Removing ingress-nginx cluster-scoped resources..."
+kubectl delete ingressclass nginx --ignore-not-found 2>/dev/null || true
+kubectl get clusterrole,clusterrolebinding -o name \
+    | grep ingress-nginx \
+    | xargs kubectl delete --ignore-not-found 2>/dev/null || true
+
 # ---------------------------------------------------------------------------
 # 3. Cluster-scoped resources created by helm hooks.
 #    These survive helm/helmfile uninstall because hook-delete-policy is
@@ -193,12 +202,12 @@ kubectl delete secret vault-cluster-keys vaultunsealkeys vaultroottoken \
 #    conflict with setup.sh's helmfile install into the external-secrets ns.
 # ---------------------------------------------------------------------------
 echo "=== [5/8] Deleting namespaces ==="
-kubectl delete ns nico-system cert-manager vault external-secrets postgres metallb-system \
+kubectl delete ns nico-system cert-manager vault external-secrets postgres ingress-nginx metallb-system \
     --wait=false --ignore-not-found 2>/dev/null || true
 
 echo "Waiting for namespaces to terminate..."
 kubectl wait --for=delete \
-    ns/nico-system ns/cert-manager ns/vault ns/external-secrets ns/postgres ns/metallb-system \
+    ns/nico-system ns/cert-manager ns/vault ns/external-secrets ns/postgres ns/ingress-nginx ns/metallb-system \
     --timeout=180s 2>/dev/null || true
 
 echo "Purging default namespace (ESO and other non-kubespray resources)..."
@@ -233,7 +242,7 @@ echo "=== [6/8] Removing Released PersistentVolumes owned by this stack ==="
 kubectl get pv -o json 2>/dev/null \
     | jq -r '.items[] | select(
         .spec.storageClassName == "local-path-persistent" and
-        (.spec.claimRef.namespace // "" | test("^(nico-system|cert-manager|vault|external-secrets|postgres|metallb-system|nico-rest|temporal)$"))
+        (.spec.claimRef.namespace // "" | test("^(nico-system|cert-manager|vault|external-secrets|postgres|ingress-nginx|metallb-system|nico-rest|temporal)$"))
       ) | .metadata.name' \
     | xargs -r kubectl delete pv --ignore-not-found 2>/dev/null || true
 
