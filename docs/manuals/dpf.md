@@ -574,10 +574,18 @@ node_label_key  = "carbide.nvidia.com/controlled.node.v2"
 # BF4 generic is opt-in. Add this table to provision BF4 DPUs via a second
 # DPUDeployment alongside BF3. All identifiers must differ from BF3's.
 [dpf.deployments.bf4_generic]
-bfb_url         = "https://content.mellanox.com/BlueField/BFBs/Ubuntu24.04/bf-bundle-<bf4-version>.bfb"
-flavor_name     = "carbide-dpu-flavor-bf4"
-deployment_name = "nico-deployment-bf4"
+# NOTE: bfb_url must NOT be set here. BF4 uses bluefield_software instead.
+flavor_name    = "dpu-flavor-bf4" 
+deployment_name = "dpu-deployment-bf4"
 node_label_key  = "carbide.nvidia.com/controlled.node.bf4"
+ 
+[dpf.deployments.bf4_generic.bluefield_software]
+# Shared across all PSIDs
+os_iso = "https://artifacts.example.com/bfb.3.3.x.iso"
+ 
+# PSID -> PLDM firmware bundle URL. 
+[dpf.deployments.bf4_generic.bluefield_software.pldm_fw_bundle]
+"MT_000000xxxx" = "https://artifacts.example.com/bf4/mt_000000xxxx.pldm"
 ```
 
 Per-deployment field reference:
