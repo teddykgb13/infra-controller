@@ -46,7 +46,7 @@ top of the repo with a single `make` command:
 
 ```sh
 make images          # deployable stack: NICo Core (nico) + the REST service images
-make images-all      # the above plus machine-validation and x86/aarch64 boot-artifact images
+make images-all      # the above plus machine-validation and x86_64/aarch64 boot-artifact images
 ```
 
 Images are tagged `localhost:5000/<name>:latest` by default. Override the registry and
