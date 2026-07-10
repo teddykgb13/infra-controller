@@ -67,7 +67,8 @@ section "Namespace Detection"
 
 # NICo namespace: find the namespace containing vault-cluster-info
 if [[ -z "${NICO_NS:-}" ]]; then
-  NICO_NS=$(kubectl get configmap vault-cluster-info -A \
+  NICO_NS=$(kubectl get configmap -A \
+    --field-selector metadata.name=vault-cluster-info \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
   NICO_NS="${NICO_NS:-nico-system}"
 fi
