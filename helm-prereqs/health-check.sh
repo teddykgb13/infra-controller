@@ -95,20 +95,24 @@ fi
 
 # cert-manager, ESO, MetalLB: discover by known deployment names
 if [[ -z "${CERT_MANAGER_NS:-}" ]]; then
-  CERT_MANAGER_NS=$(kubectl get deployment cert-manager -A \
+  CERT_MANAGER_NS=$(kubectl get deployment -A \
+    --field-selector metadata.name=cert-manager \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || printf 'cert-manager')
 fi
 if [[ -z "${ESO_NS:-}" ]]; then
-  ESO_NS=$(kubectl get deployment external-secrets -A \
+  ESO_NS=$(kubectl get deployment -A \
+    --field-selector metadata.name=external-secrets \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || printf 'external-secrets')
 fi
 if [[ -z "${METALLB_NS:-}" ]]; then
-  METALLB_NS=$(kubectl get deployment metallb-controller -A \
+  METALLB_NS=$(kubectl get deployment -A \
+    --field-selector metadata.name=metallb-controller \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || printf 'metallb-system')
 fi
 if [[ -z "${INGRESS_NGINX_NS:-}" ]]; then
-  INGRESS_NGINX_NS=$(kubectl get deployment ingress-nginx-controller -A \
-    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
+  INGRESS_NGINX_NS=$(kubectl get deployment -A \
+    --field-selector metadata.name=ingress-nginx-controller \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || printf 'ingress-nginx')
 fi
 
 printf "  %-26s %s\n" "NICo namespace:"     "${NICO_NS}"
