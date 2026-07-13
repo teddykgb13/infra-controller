@@ -115,7 +115,7 @@ async fn test_duplicate_fail_create(pool: sqlx::PgPool) -> Result<(), Box<dyn st
                 dpf_enabled: Some(true),
                 bmc_ip_address: None,
                 bmc_retain_credentials: None,
-                dpu_mode: Default::default(),
+                dpu_policy: Default::default(),
                 bmc_ip_allocation: Default::default(),
                 host_lifecycle_profile: Default::default(),
             },

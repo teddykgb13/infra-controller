@@ -53,6 +53,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".forge.DpuMode",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
+        .field_attribute(
+            ".forge.DpuMode.DPU_MODE_UNSPECIFIED",
+            "#[cfg_attr(feature = \"cli\", value(name = \"unspecified\", hide = true, alias = \"dpu-mode-unspecified\"))] #[serde(rename = \"Unspecified\", alias = \"unspecified\", alias = \"DpuModeUnspecified\", alias = \"dpu_mode_unspecified\", alias = \"DPU_MODE_UNSPECIFIED\")]",
+        )
+        .field_attribute(
+            ".forge.DpuMode.DPU_MODE",
+            "#[cfg_attr(feature = \"cli\", value(name = \"manage\", alias = \"dpu-mode\"))] #[serde(rename = \"DpuMode\", alias = \"manage\", alias = \"dpu_mode\", alias = \"DPU_MODE\")]",
+        )
+        .field_attribute(
+            ".forge.DpuMode.NIC_MODE",
+            "#[cfg_attr(feature = \"cli\", value(name = \"use-as-nic\", alias = \"nic-mode\"))] #[serde(rename = \"NicMode\", alias = \"use_as_nic\", alias = \"nic_mode\", alias = \"NIC_MODE\")]",
+        )
+        .field_attribute(
+            ".forge.DpuMode.NO_DPU",
+            "#[cfg_attr(feature = \"cli\", value(name = \"ignore\", alias = \"no-dpu\"))] #[serde(rename = \"NoDpu\", alias = \"ignore\", alias = \"no_dpu\", alias = \"NO_DPU\")]",
+        )
+        .type_attribute(
+            ".forge.HostDpuPolicy",
+            "#[cfg_attr(feature = \"cli\", derive(clap::ValueEnum))]",
+        )
+        .type_attribute(
+            ".forge.HostDpuPolicy",
+            "#[derive(serde::Serialize, serde::Deserialize)] #[serde(rename_all = \"snake_case\")]",
+        )
+        .field_attribute(
+            ".forge.HostDpuPolicy.HOST_DPU_POLICY_UNSPECIFIED",
+            "#[cfg_attr(feature = \"cli\", value(name = \"unspecified\", hide = true, alias = \"dpu-mode-unspecified\"))] #[serde(rename = \"unspecified\", alias = \"Unspecified\", alias = \"DpuModeUnspecified\", alias = \"dpu_mode_unspecified\", alias = \"DPU_MODE_UNSPECIFIED\", alias = \"HOST_DPU_POLICY_UNSPECIFIED\")]",
+        )
+        .field_attribute(
+            ".forge.HostDpuPolicy.HOST_DPU_POLICY_MANAGE",
+            "#[cfg_attr(feature = \"cli\", value(name = \"manage\", alias = \"dpu-mode\"))] #[serde(rename = \"manage\", alias = \"DpuMode\", alias = \"dpu_mode\", alias = \"DPU_MODE\", alias = \"HOST_DPU_POLICY_MANAGE\")]",
+        )
+        .field_attribute(
+            ".forge.HostDpuPolicy.HOST_DPU_POLICY_USE_AS_NIC",
+            "#[cfg_attr(feature = \"cli\", value(name = \"use-as-nic\", alias = \"nic-mode\"))] #[serde(rename = \"use_as_nic\", alias = \"NicMode\", alias = \"nic_mode\", alias = \"NIC_MODE\", alias = \"HOST_DPU_POLICY_USE_AS_NIC\")]",
+        )
+        .field_attribute(
+            ".forge.HostDpuPolicy.HOST_DPU_POLICY_IGNORE",
+            "#[cfg_attr(feature = \"cli\", value(name = \"ignore\", alias = \"no-dpu\"))] #[serde(rename = \"ignore\", alias = \"NoDpu\", alias = \"no_dpu\", alias = \"NO_DPU\", alias = \"HOST_DPU_POLICY_IGNORE\")]",
+        )
         .type_attribute(
             ".forge.BmcIpAllocationType",
             "#[cfg_attr(feature = \"cli\", derive(clap::ValueEnum))]",

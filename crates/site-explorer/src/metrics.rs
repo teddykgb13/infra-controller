@@ -45,8 +45,8 @@ pub enum PairingBlockerReason {
     HostSystemReportMissing,
     /// Host's boot MAC not found in any discovered DPU
     BootInterfaceMacMismatch,
-    /// Host BMC reports no Bluefield PCIe devices but the host isn't
-    /// declared as `dpu_mode = "no_dpu"`. We expect DPUs but didn't
+    /// Host BMC reports no BlueField PCIe devices but the host policy is not
+    /// `Ignore`. We expect DPUs but didn't
     /// find any -- likely a misconfiguration or DPU-discovery bug.
     NoDpuReportedByHost,
 }
@@ -68,7 +68,7 @@ impl Display for PairingBlockerReason {
 
 /// Signals emitted while migrating a DPU's NIC mode toward its declared target.
 /// Each marks a step in the flip-and-reset flow that drives a DPU into the
-/// mode its host's `dpu_mode` calls for.
+/// device mode its host's DPU policy calls for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DpuMigrationSignal {
     /// Found a DPU whose actual mode differs from the target; will reconfigure.
@@ -77,8 +77,8 @@ pub enum DpuMigrationSignal {
     SetNicModeIssued,
     /// Requested a host power-cycle to apply a queued NIC-mode change.
     ResetRequested,
-    /// Registered a host with zero managed DPUs because its declared
-    /// `dpu_mode` is NicMode (distinct from NoDpu).
+    /// Registered a host with zero managed DPUs because its policy is
+    /// `UseAsNic` (distinct from `Ignore`).
     RegisteredZeroDpuForNicMode,
 }
 
@@ -166,9 +166,9 @@ pub struct SiteExplorationMetrics {
     /// Generic category for the latest whole-run failure. `None` means success.
     pub run_failure_category: Option<String>,
     /// Total count of DPU NIC-mode migration signals by kind. These track the
-    /// flip-and-reset flow that drives a DPU into the mode its host's
-    /// `dpu_mode` declares (mismatch found, `set_nic_mode` issued, reset
-    /// requested, and zero-DPU registered for a NicMode host).
+    /// flip-and-reset flow that drives a DPU into the device mode its host's
+    /// DPU policy declares (mismatch found, `set_nic_mode` issued, reset
+    /// requested, and zero-DPU registered for a `UseAsNic` host).
     pub dpu_migration_signals: HashMap<String, usize>,
 }
 

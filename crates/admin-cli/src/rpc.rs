@@ -828,7 +828,7 @@ impl ApiClient {
         dpf_enabled: Option<bool>,
         bmc_ip_address: Option<String>,
         bmc_retain_credentials: Option<bool>,
-        dpu_mode: Option<::rpc::forge::DpuMode>,
+        dpu_policy: Option<::rpc::forge::HostDpuPolicy>,
         bmc_ip_allocation: Option<::rpc::forge::BmcIpAllocationType>,
         host_lifecycle_profile: Option<::rpc::forge::HostLifecycleProfile>,
         host_nics: Option<String>,
@@ -915,7 +915,15 @@ impl ApiClient {
             bmc_ip_address: bmc_ip_address.or(expected_machine.bmc_ip_address),
             bmc_retain_credentials: bmc_retain_credentials
                 .or(expected_machine.bmc_retain_credentials),
-            dpu_mode: dpu_mode.map(|m| m as i32).or(expected_machine.dpu_mode),
+            // Dual-write an explicitly requested policy for compatibility with
+            // older servers. With no flag, preserve each returned field as-is.
+            #[allow(deprecated)]
+            dpu_mode: dpu_policy
+                .map(|policy| ::rpc::forge::DpuMode::from(policy) as i32)
+                .or(expected_machine.dpu_mode),
+            dpu_policy: dpu_policy
+                .map(|policy| policy as i32)
+                .or(expected_machine.dpu_policy),
             // Use the flag value if given, else preserve the stored per-host
             // value (patch semantics).
             bmc_ip_allocation: bmc_ip_allocation
@@ -938,6 +946,11 @@ impl ApiClient {
             expected_machines: expected_machine_list
                 .into_iter()
                 .map(|machine| rpc::ExpectedMachine {
+                    #[allow(deprecated)]
+                    dpu_mode: machine
+                        .dpu_policy()
+                        .map(|policy| ::rpc::forge::DpuMode::from(policy) as i32),
+                    dpu_policy: machine.dpu_policy().map(|policy| policy as i32),
                     id: machine.id.map(|s| ::rpc::common::Uuid { value: s }),
                     bmc_mac_address: machine.bmc_mac_address.to_string(),
                     bmc_username: machine.bmc_username,
@@ -957,7 +970,6 @@ impl ApiClient {
                     is_dpf_enabled: machine.dpf_enabled,
                     bmc_ip_address: machine.bmc_ip_address,
                     bmc_retain_credentials: machine.bmc_retain_credentials,
-                    dpu_mode: machine.dpu_mode.map(|m| m as i32),
                     bmc_ip_allocation: machine.bmc_ip_allocation.map(|m| m as i32),
                     host_lifecycle_profile: machine.host_lifecycle_profile.map(|hlp| {
                         ::rpc::forge::HostLifecycleProfile {

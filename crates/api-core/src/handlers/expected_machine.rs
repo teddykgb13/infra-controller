@@ -561,6 +561,13 @@ async fn process_batch_operations(
             machine_for_result.id = Some(::rpc::common::Uuid {
                 value: id.to_string(),
             });
+            if let Err(e) = machine_for_result.normalize_dpu_policy_fields() {
+                results.push(build_failure_result(
+                    id,
+                    format!("Validation failed: {}", e),
+                ));
+                continue;
+            }
 
             let mut txn = match api.txn_begin().await {
                 Ok(txn) => txn,
@@ -603,17 +610,17 @@ async fn process_batch_operations(
     for machine in machines {
         let (id, parsed_mac) =
             sanitize_expected_machine_and_get_ids(api, machine.clone(), op.is_update())?;
-        prepared.push((machine, id, parsed_mac));
-    }
-
-    let mut txn = api.txn_begin().await?;
-
-    for (machine, id, parsed_mac) in prepared {
         let mut machine_for_result = machine.clone();
         machine_for_result.id = Some(::rpc::common::Uuid {
             value: id.to_string(),
         });
+        machine_for_result.normalize_dpu_policy_fields()?;
+        prepared.push((machine, machine_for_result, id, parsed_mac));
+    }
 
+    let mut txn = api.txn_begin().await?;
+
+    for (machine, machine_for_result, id, parsed_mac) in prepared {
         if let Err(e) = apply_operation(
             op,
             txn.as_pgconn(),

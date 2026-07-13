@@ -635,7 +635,9 @@ async fn test_add_expected_machine_dpu_serials(pool: sqlx::PgPool) {
         is_dpf_enabled: Some(true),
         bmc_ip_address: None,
         bmc_retain_credentials: None,
+        #[allow(deprecated)]
         dpu_mode: None,
+        dpu_policy: None,
         bmc_ip_allocation: None,
         host_lifecycle_profile: None,
         #[allow(deprecated)]
@@ -1039,6 +1041,7 @@ async fn test_delete_expected_machine_by_id(pool: sqlx::PgPool) {
     );
 }
 
+#[allow(deprecated)]
 #[crate::sqlx_test()]
 async fn test_batch_create_expected_machines_all_or_nothing_success(pool: sqlx::PgPool) {
     let env = create_test_env(pool).await;
@@ -1058,6 +1061,7 @@ async fn test_batch_create_expected_machines_all_or_nothing_success(pool: sqlx::
                     bmc_password: "pass1".to_string(),
                     chassis_serial_number: "SERIAL-001".to_string(),
                     metadata: Some(rpc::forge::Metadata::default()),
+                    dpu_policy: Some(rpc::forge::HostDpuPolicy::UseAsNic as i32),
                     ..Default::default()
                 },
                 rpc::forge::ExpectedMachine {
@@ -1069,6 +1073,7 @@ async fn test_batch_create_expected_machines_all_or_nothing_success(pool: sqlx::
                     bmc_password: "pass2".to_string(),
                     chassis_serial_number: "SERIAL-002".to_string(),
                     metadata: Some(rpc::forge::Metadata::default()),
+                    dpu_mode: Some(rpc::forge::DpuMode::NoDpu as i32),
                     ..Default::default()
                 },
             ],
@@ -1086,6 +1091,24 @@ async fn test_batch_create_expected_machines_all_or_nothing_success(pool: sqlx::
     assert_eq!(results.len(), 2);
     assert!(results[0].success);
     assert!(results[1].success);
+    let result_machine1 = results[0].expected_machine.as_ref().unwrap();
+    assert_eq!(
+        result_machine1.dpu_policy,
+        Some(rpc::forge::HostDpuPolicy::UseAsNic as i32)
+    );
+    assert_eq!(
+        result_machine1.dpu_mode,
+        Some(rpc::forge::DpuMode::NicMode as i32)
+    );
+    let result_machine2 = results[1].expected_machine.as_ref().unwrap();
+    assert_eq!(
+        result_machine2.dpu_policy,
+        Some(rpc::forge::HostDpuPolicy::Ignore as i32)
+    );
+    assert_eq!(
+        result_machine2.dpu_mode,
+        Some(rpc::forge::DpuMode::NoDpu as i32)
+    );
 
     // Verify both machines were created
     let get_req1 = rpc::forge::ExpectedMachineRequest {
@@ -1304,6 +1327,7 @@ async fn test_batch_create_missing_id(pool: sqlx::PgPool) {
     assert!(result.is_err(), "Should fail when id is missing");
 }
 
+#[allow(deprecated)]
 #[crate::sqlx_test()]
 async fn test_batch_update_expected_machines_all_or_nothing_success(pool: sqlx::PgPool) {
     let env = create_test_env(pool).await;
@@ -1360,6 +1384,8 @@ async fn test_batch_update_expected_machines_all_or_nothing_success(pool: sqlx::
                     bmc_password: "pass1_updated".to_string(),
                     chassis_serial_number: "SERIAL-010".to_string(),
                     metadata: Some(rpc::forge::Metadata::default()),
+                    dpu_mode: Some(rpc::forge::DpuMode::NoDpu as i32),
+                    dpu_policy: Some(rpc::forge::HostDpuPolicy::UseAsNic as i32),
                     ..Default::default()
                 },
                 rpc::forge::ExpectedMachine {
@@ -1371,6 +1397,7 @@ async fn test_batch_update_expected_machines_all_or_nothing_success(pool: sqlx::
                     bmc_password: "pass2_updated".to_string(),
                     chassis_serial_number: "SERIAL-011".to_string(),
                     metadata: Some(rpc::forge::Metadata::default()),
+                    dpu_mode: Some(rpc::forge::DpuMode::NoDpu as i32),
                     ..Default::default()
                 },
             ],
@@ -1388,6 +1415,25 @@ async fn test_batch_update_expected_machines_all_or_nothing_success(pool: sqlx::
     assert_eq!(results.len(), 2);
     assert!(results[0].success);
     assert!(results[1].success);
+    let result_machine1 = results[0].expected_machine.as_ref().unwrap();
+    assert_eq!(
+        result_machine1.dpu_policy,
+        Some(rpc::forge::HostDpuPolicy::UseAsNic as i32)
+    );
+    assert_eq!(
+        result_machine1.dpu_mode,
+        Some(rpc::forge::DpuMode::NicMode as i32),
+        "canonical policy should replace a conflicting legacy response value"
+    );
+    let result_machine2 = results[1].expected_machine.as_ref().unwrap();
+    assert_eq!(
+        result_machine2.dpu_policy,
+        Some(rpc::forge::HostDpuPolicy::Ignore as i32)
+    );
+    assert_eq!(
+        result_machine2.dpu_mode,
+        Some(rpc::forge::DpuMode::NoDpu as i32)
+    );
 
     // Verify both machines were updated
     let get_req1 = rpc::forge::ExpectedMachineRequest {
@@ -2709,29 +2755,28 @@ async fn test_declared_primary_survives_dhcp_arrival_order(
     Ok(())
 }
 
-/// Simple test to have some round-trip coverage for `ExpectedMachine.dpu_mode`
-/// to make sure a `NicMode` setting makes it from the API to the DB and back
-/// correctly. Verifies:
-/// - The RPC carrying `Some(DpuMode::NicMode)` persists.
-/// - The re-read RPC response replies `dpu_mode = Some(NicMode)` back
-/// - Other `dpu_mode` values do the same.
+/// Non-default host DPU policies round-trip from the API through the database.
+#[allow(deprecated)]
 #[crate::sqlx_test]
-async fn test_dpu_mode_round_trip_for_non_default_values(
+async fn test_dpu_policy_round_trip_for_non_default_values(
     pool: sqlx::PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let env = create_test_env(pool).await;
 
-    for (idx, mode) in [rpc::forge::DpuMode::NicMode, rpc::forge::DpuMode::NoDpu]
-        .iter()
-        .enumerate()
+    for (idx, policy) in [
+        rpc::forge::HostDpuPolicy::UseAsNic,
+        rpc::forge::HostDpuPolicy::Ignore,
+    ]
+    .iter()
+    .enumerate()
     {
         let mac = format!("5A:5B:5C:5D:5E:{idx:02X}");
         let request = rpc::forge::ExpectedMachine {
             bmc_mac_address: mac.clone(),
             bmc_username: "ADMIN".into(),
             bmc_password: "PASS".into(),
-            chassis_serial_number: format!("EM-DPU-MODE-{idx}"),
-            dpu_mode: Some(*mode as i32),
+            chassis_serial_number: format!("EM-DPU-POLICY-{idx}"),
+            dpu_policy: Some(*policy as i32),
             ..Default::default()
         };
 
@@ -2749,21 +2794,64 @@ async fn test_dpu_mode_round_trip_for_non_default_values(
             .into_inner();
 
         assert_eq!(
+            retrieved.dpu_policy,
+            Some(*policy as i32),
+            "canonical DPU policy {policy:?} should survive DB round-trip unchanged"
+        );
+        assert_eq!(
             retrieved.dpu_mode,
-            Some(*mode as i32),
-            "DPU mode {mode:?} should survive DB round-trip unchanged"
+            Some(rpc::forge::DpuMode::from(*policy) as i32),
+            "canonical DPU policy {policy:?} should be mirrored for legacy clients"
         );
     }
 
     Ok(())
 }
 
-/// Also have some "round trip" coverage for the dpu_mode default case,
-/// when the operator didn't set `dpu_mode` on the wire. In this case,
-/// we should persist the Postgrs default (`DpuMode::DpuMode`) and return
-/// `None` on the wire (so old clients see the same thing they sent).
+/// Requests from clients generated before `dpu_policy` was introduced still
+/// persist correctly and are translated onto the canonical response field.
+#[allow(deprecated)]
 #[crate::sqlx_test]
-async fn test_dpu_mode_default_value_omitted_on_wire(
+async fn test_legacy_dpu_mode_translates_to_canonical_policy(
+    pool: sqlx::PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let env = create_test_env(pool).await;
+    let mac = "5A:5B:5C:5D:5E:70";
+
+    env.api
+        .add_expected_machine(tonic::Request::new(rpc::forge::ExpectedMachine {
+            bmc_mac_address: mac.into(),
+            bmc_username: "ADMIN".into(),
+            bmc_password: "PASS".into(),
+            chassis_serial_number: "EM-LEGACY-DPU-MODE".into(),
+            dpu_mode: Some(rpc::forge::DpuMode::NoDpu as i32),
+            ..Default::default()
+        }))
+        .await?;
+
+    let retrieved = env
+        .api
+        .get_expected_machine(tonic::Request::new(rpc::forge::ExpectedMachineRequest {
+            bmc_mac_address: mac.into(),
+            id: None,
+        }))
+        .await?
+        .into_inner();
+
+    assert_eq!(
+        retrieved.dpu_policy,
+        Some(rpc::forge::HostDpuPolicy::Ignore as i32)
+    );
+    assert_eq!(retrieved.dpu_mode, Some(rpc::forge::DpuMode::NoDpu as i32));
+
+    Ok(())
+}
+
+/// The default host DPU policy is omitted on the wire, preserving existing
+/// clients' absent-field behavior.
+#[allow(deprecated)]
+#[crate::sqlx_test]
+async fn test_dpu_policy_default_value_omitted_on_wire(
     pool: sqlx::PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let env = create_test_env(pool).await;
@@ -2775,7 +2863,6 @@ async fn test_dpu_mode_default_value_omitted_on_wire(
             bmc_username: "ADMIN".into(),
             bmc_password: "PASS".into(),
             chassis_serial_number: "EM-DPU-DEFAULT".into(),
-            dpu_mode: None,
             ..Default::default()
         }))
         .await?;
@@ -2791,16 +2878,21 @@ async fn test_dpu_mode_default_value_omitted_on_wire(
 
     assert_eq!(
         retrieved.dpu_mode, None,
-        "default DpuMode should not be emitted on the wire for stable round-trips"
+        "default HostDpuPolicy should not be emitted on the legacy field"
+    );
+    assert_eq!(
+        retrieved.dpu_policy, None,
+        "default HostDpuPolicy should not be emitted on the canonical field"
     );
 
     Ok(())
 }
 
-/// Verify the update RPC (for update/patch flows) actually flips
-/// `dpu_mode` as expected.
+/// Verify the update RPC (for update/patch flows) actually changes
+/// `dpu_policy` as expected.
+#[allow(deprecated)]
 #[crate::sqlx_test]
-async fn test_update_changes_dpu_mode(
+async fn test_update_changes_dpu_policy(
     pool: sqlx::PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let env = create_test_env(pool).await;
@@ -2819,14 +2911,14 @@ async fn test_update_changes_dpu_mode(
         .add_expected_machine(tonic::Request::new(base.clone()))
         .await?;
 
-    for mode in [
-        rpc::forge::DpuMode::NicMode,
-        rpc::forge::DpuMode::NoDpu,
-        rpc::forge::DpuMode::DpuMode,
+    for policy in [
+        rpc::forge::HostDpuPolicy::UseAsNic,
+        rpc::forge::HostDpuPolicy::Ignore,
+        rpc::forge::HostDpuPolicy::Manage,
     ] {
         env.api
             .update_expected_machine(tonic::Request::new(rpc::forge::ExpectedMachine {
-                dpu_mode: Some(mode as i32),
+                dpu_policy: Some(policy as i32),
                 ..base.clone()
             }))
             .await?;
@@ -2840,16 +2932,82 @@ async fn test_update_changes_dpu_mode(
             .await?
             .into_inner();
 
-        // DpuMode is the column default and the wire-default; the model
+        // Manage is the column default and the wire-default; the model
         // collapses it to `None` on the way out (see `From<ExpectedMachine>
         // for rpc::forge::ExpectedMachine`), so compare accordingly.
-        let expected_wire = match mode {
-            rpc::forge::DpuMode::DpuMode | rpc::forge::DpuMode::Unspecified => None,
+        let expected_canonical = match policy {
+            rpc::forge::HostDpuPolicy::Manage | rpc::forge::HostDpuPolicy::Unspecified => None,
             other => Some(other as i32),
         };
         assert_eq!(
-            retrieved.dpu_mode, expected_wire,
-            "update to {mode:?} should persist and round-trip on the wire"
+            retrieved.dpu_policy, expected_canonical,
+            "update to {policy:?} should persist on the canonical field"
+        );
+        assert_eq!(
+            retrieved.dpu_mode,
+            expected_canonical.map(|_| { rpc::forge::DpuMode::from(policy) as i32 }),
+            "update to {policy:?} should mirror onto the legacy field"
+        );
+    }
+
+    Ok(())
+}
+
+/// A named canonical policy is authoritative when both fields are present;
+/// its Unspecified sentinel deliberately falls back to the legacy declaration.
+#[allow(deprecated)]
+#[crate::sqlx_test]
+async fn test_dpu_policy_precedence_and_legacy_fallback(
+    pool: sqlx::PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let env = create_test_env(pool).await;
+    let mac = "5A:5B:5C:5D:5E:71";
+    let base = rpc::forge::ExpectedMachine {
+        bmc_mac_address: mac.into(),
+        bmc_username: "ADMIN".into(),
+        bmc_password: "PASS".into(),
+        chassis_serial_number: "EM-DPU-POLICY-PRECEDENCE".into(),
+        metadata: Some(rpc::forge::Metadata::default()),
+        ..Default::default()
+    };
+
+    env.api
+        .add_expected_machine(tonic::Request::new(base.clone()))
+        .await?;
+
+    for (canonical, legacy, expected) in [
+        (
+            rpc::forge::HostDpuPolicy::UseAsNic,
+            rpc::forge::DpuMode::NoDpu,
+            rpc::forge::HostDpuPolicy::UseAsNic,
+        ),
+        (
+            rpc::forge::HostDpuPolicy::Unspecified,
+            rpc::forge::DpuMode::NoDpu,
+            rpc::forge::HostDpuPolicy::Ignore,
+        ),
+    ] {
+        env.api
+            .update_expected_machine(tonic::Request::new(rpc::forge::ExpectedMachine {
+                dpu_policy: Some(canonical as i32),
+                dpu_mode: Some(legacy as i32),
+                ..base.clone()
+            }))
+            .await?;
+
+        let retrieved = env
+            .api
+            .get_expected_machine(tonic::Request::new(rpc::forge::ExpectedMachineRequest {
+                bmc_mac_address: mac.into(),
+                id: None,
+            }))
+            .await?
+            .into_inner();
+
+        assert_eq!(retrieved.dpu_policy, Some(expected as i32));
+        assert_eq!(
+            retrieved.dpu_mode,
+            Some(rpc::forge::DpuMode::from(expected) as i32)
         );
     }
 

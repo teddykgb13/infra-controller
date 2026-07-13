@@ -35,6 +35,28 @@ pub mod scout_firmware_upgrade {
 #[rustfmt::skip]
 pub mod forge {
     include!(concat!(env!("OUT_DIR"), "/forge.rs"));
+
+    impl From<HostDpuPolicy> for DpuMode {
+        fn from(policy: HostDpuPolicy) -> Self {
+            match policy {
+                HostDpuPolicy::Unspecified => Self::Unspecified,
+                HostDpuPolicy::Manage => Self::DpuMode,
+                HostDpuPolicy::UseAsNic => Self::NicMode,
+                HostDpuPolicy::Ignore => Self::NoDpu,
+            }
+        }
+    }
+
+    impl From<DpuMode> for HostDpuPolicy {
+        fn from(mode: DpuMode) -> Self {
+            match mode {
+                DpuMode::Unspecified => Self::Unspecified,
+                DpuMode::DpuMode => Self::Manage,
+                DpuMode::NicMode => Self::UseAsNic,
+                DpuMode::NoDpu => Self::Ignore,
+            }
+        }
+    }
 }
 
 #[allow(non_snake_case, unknown_lints, clippy::all)]
@@ -65,6 +87,12 @@ pub mod mlx_device {
 #[rustfmt::skip]
 pub mod site_explorer {
     include!(concat!(env!("OUT_DIR"), "/site_explorer.rs"));
+
+    /// Observed-state Rust name for the legacy protobuf `NicMode` boundary.
+    ///
+    /// The protobuf descriptor retains `NicMode` for compatibility with
+    /// existing generated clients. New Rust callers should use this alias.
+    pub type BlueFieldOperatingMode = NicMode;
 }
 
 #[allow(non_snake_case, unknown_lints, clippy::all)]

@@ -19,10 +19,33 @@ use std::collections::HashMap;
 
 use carbide_uuid::rack::RackId;
 use mac_address::MacAddress;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn deserialize_dpu_policy<'de, D>(
+    deserializer: D,
+) -> Result<Option<rpc::forge::HostDpuPolicy>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DpuPolicyInput {
+        Name(rpc::forge::HostDpuPolicy),
+        Number(i32),
+    }
+
+    Option::<DpuPolicyInput>::deserialize(deserializer)?
+        .map(|value| match value {
+            DpuPolicyInput::Name(policy) => Ok(policy),
+            DpuPolicyInput::Number(policy) => {
+                rpc::forge::HostDpuPolicy::try_from(policy).map_err(serde::de::Error::custom)
+            }
+        })
+        .transpose()
+}
 
 /// JSON shape for `replace-all` and file-based `update` (field names match gRPC / API `ExpectedMachine`).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ExpectedMachineJson {
     #[serde(default)]
     pub id: Option<String>,
@@ -45,11 +68,17 @@ pub struct ExpectedMachineJson {
     pub bmc_ip_address: Option<String>,
     #[serde(default)]
     pub bmc_retain_credentials: Option<bool>,
-    /// Per-host DPU operating mode. None == defer to the site-wide
-    /// `[site_explorer] dpu_mode` setting (falls back to `DpuMode::DpuMode`
-    /// if that's also unset).
-    #[serde(default)]
-    pub dpu_mode: Option<rpc::forge::DpuMode>,
+    /// Per-host DPU policy. None == defer to the site-wide
+    /// `[site_explorer] dpu_policy` setting (falls back to `Manage` if that's
+    /// also unset). The legacy `dpu_mode` field and values remain accepted.
+    #[serde(default, deserialize_with = "deserialize_dpu_policy")]
+    dpu_policy: Option<rpc::forge::HostDpuPolicy>,
+    #[serde(
+        default,
+        rename = "dpu_mode",
+        deserialize_with = "deserialize_dpu_policy"
+    )]
+    legacy_dpu_policy: Option<rpc::forge::HostDpuPolicy>,
     /// Per-host control over how this BMC's IP is assigned and retained. None ==
     /// the server default (`Auto`), which resolves to `fixed` when a
     /// `bmc_ip_address` is set and `retained` when it isn't.
@@ -58,6 +87,16 @@ pub struct ExpectedMachineJson {
     /// Per-host lifecycle profile for settings that affect state-machine progression.
     #[serde(default)]
     pub host_lifecycle_profile: Option<HostLifecycleProfile>,
+}
+
+impl ExpectedMachineJson {
+    pub fn dpu_policy(&self) -> Option<rpc::forge::HostDpuPolicy> {
+        match (self.dpu_policy, self.legacy_dpu_policy) {
+            (Some(rpc::forge::HostDpuPolicy::Unspecified), Some(legacy)) => Some(legacy),
+            (canonical @ Some(_), _) => canonical,
+            (None, legacy) => legacy,
+        }
+    }
 }
 
 /// JSON shape for `host_lifecycle_profile` nested object.
@@ -74,4 +113,98 @@ pub struct _ExpectedMachineMetadata {
     pub name: Option<String>,
     pub description: Option<String>,
     pub labels: HashMap<String, Option<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use carbide_test_support::Outcome::*;
+    use carbide_test_support::scenarios;
+
+    use super::*;
+
+    #[test]
+    fn expected_machine_json_deserializes_new_and_legacy_dpu_policy() {
+        scenarios!(
+            run = |policy_json| {
+                let json = format!(
+                    r#"{{
+                        "bmc_mac_address": "AA:BB:CC:DD:EE:FF",
+                        "bmc_username": "root",
+                        "bmc_password": "pass",
+                        "chassis_serial_number": "SN-1"
+                        {policy_json}
+                    }}"#,
+                );
+                serde_json::from_str::<ExpectedMachineJson>(&json)
+                    .map(|machine| machine.dpu_policy())
+                    .map_err(drop)
+            };
+            "policy omitted" {
+                "" => Yields(None),
+            }
+
+            "canonical field and value" {
+                r#", "dpu_policy": "use_as_nic""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+
+            "legacy field and config value" {
+                r#", "dpu_mode": "nic_mode""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+
+            "legacy field and generated Rust value" {
+                r#", "dpu_mode": "NicMode""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+
+            "matching canonical and legacy fields" {
+                r#", "dpu_policy": "use_as_nic", "dpu_mode": "nic_mode""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+
+            "canonical field wins" {
+                r#", "dpu_policy": "ignore", "dpu_mode": "nic_mode""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::Ignore)),
+            }
+
+            "unspecified canonical field falls back to legacy" {
+                r#", "dpu_policy": "Unspecified", "dpu_mode": "nic_mode""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+
+            "unspecified canonical field remains explicit without legacy" {
+                r#", "dpu_policy": "Unspecified""# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::Unspecified)),
+            }
+
+            "numeric fields emitted by RPC JSON" {
+                r#", "dpu_policy": 2, "dpu_mode": 2"# =>
+                    Yields(Some(rpc::forge::HostDpuPolicy::UseAsNic)),
+            }
+        );
+    }
+
+    #[test]
+    fn expected_machine_json_round_trips_rpc_output_with_both_dpu_fields() {
+        let output = rpc::forge::ExpectedMachine {
+            bmc_mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            bmc_username: "root".to_string(),
+            bmc_password: "pass".to_string(),
+            chassis_serial_number: "SN-1".to_string(),
+            #[allow(deprecated)]
+            dpu_mode: Some(rpc::forge::DpuMode::NicMode as i32),
+            dpu_policy: Some(rpc::forge::HostDpuPolicy::UseAsNic as i32),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&output).expect("RPC output should serialize");
+        let input = serde_json::from_str::<ExpectedMachineJson>(&json)
+            .expect("RPC output should deserialize as file input");
+
+        assert_eq!(
+            input.dpu_policy(),
+            Some(rpc::forge::HostDpuPolicy::UseAsNic)
+        );
+    }
 }

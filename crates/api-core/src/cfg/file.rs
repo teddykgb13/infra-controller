@@ -579,7 +579,7 @@ pub struct CarbideConfig {
     /// (disconnected / air-gapped) infrastructure manager for racks of GB200/GB300/VR144.
     /// Only set this if using NICo site controller with Rack Manager to manage GB200/300/VR144.
     /// It will change site controller behavior significantly in the following ways, etc.:
-    /// 1. skip dpu management and use dpus in nic mode (set the site-wide `[site_explorer] dpu_mode = "nic_mode"`, or per-host `ExpectedMachine.dpu_mode`)
+    /// 1. skip DPU management and use DPUs as NICs (set the site-wide `[site_explorer] dpu_policy = "use_as_nic"`, or per-host `ExpectedMachine.dpu_policy`)
     ///    a. no dpu bfb upgrade and host power cycle
     ///    b. no firmware upgrade and host power cycle
     ///    c. no hbn deployment (no ecmp, etc)
@@ -3022,7 +3022,7 @@ mod tests {
     use health_report::HealthAlertClassification;
     use libmlx::variables::value::MlxValueType;
     use libredfish::model::service_root::RedfishVendor;
-    use model::expected_machine::DpuMode;
+    use model::expected_machine::HostDpuPolicy;
     use model::network_segment::NetworkDefinitionSegmentType;
     use model::resource_pool;
 
@@ -3468,7 +3468,7 @@ mod tests {
                 create_switches: Arc::new(true.into()),
                 switches_created_per_run: 9,
                 rotate_switch_nvos_credentials: Arc::new(false.into()),
-                dpu_mode: None,
+                dpu_policy: None,
                 explore_mode: SiteExplorerExploreMode::NvRedfish,
             }
         );
@@ -3676,7 +3676,7 @@ mod tests {
                 create_switches: Arc::new(true.into()),
                 switches_created_per_run: 9,
                 rotate_switch_nvos_credentials: Arc::new(false.into()),
-                dpu_mode: None,
+                dpu_policy: None,
                 explore_mode: SiteExplorerExploreMode::NvRedfish,
             }
         );
@@ -4019,7 +4019,7 @@ mod tests {
                 create_switches: Arc::new(true.into()),
                 switches_created_per_run: 9,
                 rotate_switch_nvos_credentials: Arc::new(false.into()),
-                dpu_mode: None,
+                dpu_policy: None,
                 explore_mode: SiteExplorerExploreMode::NvRedfish,
             }
         );
@@ -4209,36 +4209,87 @@ mod tests {
         Ok(())
     }
 
-    /// Verifies the `[site_explorer] dpu_mode = ...` setting parses
-    /// correctly for every named variant. When unset (the default),
-    /// `site_explorer.dpu_mode` is `None` and hosts resolve to
-    /// `DpuMode::DpuMode`.
+    /// Verifies the canonical `[site_explorer] dpu_policy = ...` setting and
+    /// legacy `dpu_mode` spelling parse correctly. When unset, hosts ultimately
+    /// resolve to `HostDpuPolicy::Manage`.
     #[test]
-    fn site_explorer_dpu_mode_parses_and_defaults_to_none() {
+    fn site_explorer_dpu_policy_parses_and_defaults_to_none() {
         let config: CarbideConfig = Figment::new()
             .merge(Toml::file(format!("{TEST_DATA_DIR}/min_config.toml")))
             .extract()
             .unwrap();
-        assert_eq!(config.site_explorer.dpu_mode, None);
+        assert_eq!(config.site_explorer.dpu_policy, None);
 
-        for (toml_value, expected) in [
-            ("dpu_mode", DpuMode::DpuMode),
-            ("nic_mode", DpuMode::NicMode),
-            ("no_dpu", DpuMode::NoDpu),
+        for (toml_setting, expected) in [
+            ("dpu_policy = \"manage\"", HostDpuPolicy::Manage),
+            ("dpu_policy = \"use_as_nic\"", HostDpuPolicy::UseAsNic),
+            ("dpu_policy = \"ignore\"", HostDpuPolicy::Ignore),
+            ("dpu_mode = \"dpu_mode\"", HostDpuPolicy::Manage),
+            ("dpu_mode = \"nic_mode\"", HostDpuPolicy::UseAsNic),
+            ("dpu_mode = \"no_dpu\"", HostDpuPolicy::Ignore),
         ] {
             let config: CarbideConfig = Figment::new()
                 .merge(Toml::file(format!("{TEST_DATA_DIR}/min_config.toml")))
-                .merge(Toml::string(&format!(
-                    "[site_explorer]\ndpu_mode = \"{toml_value}\"\n"
-                )))
+                .merge(Toml::string(&format!("[site_explorer]\n{toml_setting}\n")))
                 .extract()
                 .unwrap();
             assert_eq!(
-                config.site_explorer.dpu_mode,
+                config.site_explorer.dpu_policy,
                 Some(expected),
-                "[site_explorer] dpu_mode = {toml_value:?} should parse to {expected:?}",
+                "[site_explorer] {toml_setting} should parse to {expected:?}",
             );
         }
+    }
+
+    /// Legacy and canonical keys can coexist after Figment merges layered
+    /// configuration providers. The canonical key wins regardless of which
+    /// provider introduced the legacy key.
+    #[test]
+    fn site_explorer_dpu_policy_prefers_canonical_key_across_layers() {
+        for (base_setting, overlay_setting, expected) in [
+            (
+                "dpu_mode = \"no_dpu\"",
+                "dpu_policy = \"manage\"",
+                HostDpuPolicy::Manage,
+            ),
+            (
+                "dpu_policy = \"use_as_nic\"",
+                "dpu_mode = \"no_dpu\"",
+                HostDpuPolicy::UseAsNic,
+            ),
+        ] {
+            let config: CarbideConfig = Figment::new()
+                .merge(Toml::file(format!("{TEST_DATA_DIR}/min_config.toml")))
+                .merge(Toml::string(&format!("[site_explorer]\n{base_setting}\n")))
+                .merge(Toml::string(&format!(
+                    "[site_explorer]\n{overlay_setting}\n"
+                )))
+                .extract()
+                .unwrap();
+
+            assert_eq!(
+                config.site_explorer.dpu_policy,
+                Some(expected),
+                "canonical dpu_policy should win for {base_setting} overlaid by {overlay_setting}",
+            );
+        }
+    }
+
+    #[test]
+    fn site_explorer_dpu_policy_serializes_only_canonical_key() {
+        let config = SiteExplorerConfig {
+            dpu_policy: Some(HostDpuPolicy::Ignore),
+            ..SiteExplorerConfig::default()
+        };
+
+        let serialized = serde_json::to_value(config).unwrap();
+        assert_eq!(
+            serialized
+                .get("dpu_policy")
+                .and_then(|value| value.as_str()),
+            Some("ignore")
+        );
+        assert!(serialized.get("dpu_mode").is_none());
     }
 
     #[test]

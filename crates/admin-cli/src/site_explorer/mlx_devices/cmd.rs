@@ -16,7 +16,7 @@
  */
 
 use ::rpc::admin_cli::OutputFormat;
-use ::rpc::site_explorer::{ExploredMlxDevice, MlxDeviceKind, NicMode};
+use ::rpc::site_explorer::{BlueFieldOperatingMode, ExploredMlxDevice, MlxDeviceKind};
 use prettytable::{Row, Table};
 use serde::Serialize;
 
@@ -111,7 +111,7 @@ impl From<ExploredMlxDevice> for MlxDeviceRow {
 /// below we err toward surfacing a device rather than hiding it.
 fn operating_as_nic(device: &ExploredMlxDevice) -> bool {
     match device.nic_mode {
-        Some(mode) => mode == NicMode::Nic as i32,
+        Some(mode) => mode == BlueFieldOperatingMode::Nic as i32,
         None => {
             device.device_kind == MlxDeviceKind::Bf3NicMode as i32
                 || device.device_kind == MlxDeviceKind::Bf3SuperNic as i32
@@ -132,9 +132,9 @@ fn kind_label(device_kind: i32) -> String {
 }
 
 fn nic_mode_label(nic_mode: Option<i32>) -> Option<String> {
-    nic_mode.and_then(|mode| match NicMode::try_from(mode) {
-        Ok(NicMode::Nic) => Some("NIC".to_string()),
-        Ok(NicMode::Dpu) => Some("DPU".to_string()),
+    nic_mode.and_then(|mode| match BlueFieldOperatingMode::try_from(mode) {
+        Ok(BlueFieldOperatingMode::Nic) => Some("NIC".to_string()),
+        Ok(BlueFieldOperatingMode::Dpu) => Some("DPU".to_string()),
         Err(_) => None,
     })
 }
@@ -197,26 +197,26 @@ mod tests {
         struct Case {
             name: &'static str,
             device_kind: MlxDeviceKind,
-            nic_mode: Option<NicMode>,
+            nic_mode: Option<BlueFieldOperatingMode>,
             expect: bool,
         }
         let cases = [
             Case {
                 name: "dpu sku flipped into nic mode",
                 device_kind: MlxDeviceKind::Bf3DpuMode,
-                nic_mode: Some(NicMode::Nic),
+                nic_mode: Some(BlueFieldOperatingMode::Nic),
                 expect: true,
             },
             Case {
                 name: "dpu sku running as a dpu",
                 device_kind: MlxDeviceKind::Bf3DpuMode,
-                nic_mode: Some(NicMode::Dpu),
+                nic_mode: Some(BlueFieldOperatingMode::Dpu),
                 expect: false,
             },
             Case {
                 name: "supernic sku flipped into dpu mode",
                 device_kind: MlxDeviceKind::Bf3NicMode,
-                nic_mode: Some(NicMode::Dpu),
+                nic_mode: Some(BlueFieldOperatingMode::Dpu),
                 expect: false,
             },
             Case {

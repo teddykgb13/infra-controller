@@ -6005,24 +6005,46 @@ message ExpectedHostNic {
   optional NetworkSegmentType network_segment_type = 7;
 }
 
-// Per-host DPU operating mode. Lets site operators mix DPU-mode,
-// NIC-mode, and no-DPU hosts within a single site.
+// Deprecated protobuf representation of the per-host policy for how NICo
+// treats DPU hardware. Existing clients may continue to send this enum through
+// `ExpectedMachine.dpu_mode`; the server translates it to `HostDpuPolicy`.
 //
-// - DPU_MODE: The default. Attached DPUs are managed by NICo (DPU upgrades,
-//   overlay networking, etc).
-// - NIC_MODE: DPUs are present physically but operate as plain NICs. Site
-//   explorer reconfigures them to NIC mode if needed; the host is then
-//   tracked as if it had no DPUs.
-// - NO_DPU: no DPU hardware at all -- a plain host NIC on the underlay.
+// - DPU_MODE: `HostDpuPolicy::Manage`. Attached DPUs are managed by NICo. At
+//   the per-host boundary this retains the legacy inheritance behavior and
+//   defers to the site policy.
+// - NIC_MODE: `HostDpuPolicy::UseAsNic`. Physically present DPUs operate as
+//   plain NICs and the host is tracked as if it had no DPUs.
+// - NO_DPU: `HostDpuPolicy::Ignore`. NICo does not configure or attach DPU
+//   hardware.
 //
-// Unset and `DPU_MODE_UNSPECIFIED` both mean "use the site default,"
-// which comes from `[site_explorer] dpu_mode` (and falls back to
-// DPU_MODE when that's unset).
+// Unset and `DPU_MODE_UNSPECIFIED` both mean "use the site default," which
+// comes from `[site_explorer] dpu_policy` (and falls back to `Manage` when
+// that's unset).
 enum DpuMode {
   DPU_MODE_UNSPECIFIED = 0;
   DPU_MODE = 1;
   NIC_MODE = 2;
   NO_DPU = 3;
+}
+
+// Per-host policy for how NICo treats DPU hardware. This is intentionally
+// separate from the operating mode observed on a device.
+//
+// - HOST_DPU_POLICY_MANAGE: Attached DPUs are managed by NICo. At the per-host
+//   boundary this retains the legacy inheritance behavior and defers to the
+//   site policy.
+// - HOST_DPU_POLICY_USE_AS_NIC: Physically present DPUs operate as plain NICs
+//   and the host is tracked as if it had no DPUs.
+// - HOST_DPU_POLICY_IGNORE: NICo does not configure or attach DPU hardware.
+//
+// Unset and `HOST_DPU_POLICY_UNSPECIFIED` both fall back to the deprecated
+// `ExpectedMachine.dpu_mode` field. When neither field declares a policy, the
+// site policy applies and ultimately defaults to `Manage`.
+enum HostDpuPolicy {
+  HOST_DPU_POLICY_UNSPECIFIED = 0;
+  HOST_DPU_POLICY_MANAGE = 1;
+  HOST_DPU_POLICY_USE_AS_NIC = 2;
+  HOST_DPU_POLICY_IGNORE = 3;
 }
 
 // Per-host control over how a BMC's IP address is assigned and whether it is
@@ -6077,16 +6099,20 @@ message ExpectedMachine {
   // When true, site-explorer skips BMC password rotation and stores the
   // factory-default credentials in Vault as-is.
   optional bool bmc_retain_credentials = 15;
-  // Per-host DPU operating mode. See `DpuMode` above. Unset means "use
-  // the site-wide `[site_explorer] dpu_mode` default" (which itself
-  // defaults to DPU_MODE when unset).
-  optional DpuMode dpu_mode = 16;
+  // Deprecated: use `dpu_policy`. Existing clients may continue to send this
+  // field; the server translates it to `HostDpuPolicy`. Responses mirror a
+  // non-default policy into both fields during the compatibility window.
+  optional DpuMode dpu_mode = 16 [deprecated = true];
   // Per-host lifecycle profile. When unset in a patch/update request, the
   // existing DB value is preserved via COALESCE.
   optional HostLifecycleProfile host_lifecycle_profile = 17;
   // Per-host control over how this BMC's IP is assigned and retained. See
   // `BmcIpAllocationType` above. Unset means "use the default" (AUTO).
   optional BmcIpAllocationType bmc_ip_allocation = 18;
+  // Canonical per-host DPU policy. A named value here takes precedence over
+  // the deprecated `dpu_mode` field. Unset or `HOST_DPU_POLICY_UNSPECIFIED`
+  // falls back to `dpu_mode`, then to the site-wide policy.
+  optional HostDpuPolicy dpu_policy = 19;
 }
 
 message ExpectedMachineRequest {

@@ -33,7 +33,7 @@ use model::expected_entity::{BmcCredentialsData, ExpectedEntity};
 use model::expected_switch::ExpectedSwitch;
 use model::machine::MachineInterfaceSnapshot;
 use model::site_explorer::{
-    EndpointExplorationError, EndpointExplorationReport, LockdownStatus, NicMode,
+    BlueFieldOperatingMode, EndpointExplorationError, EndpointExplorationReport, LockdownStatus,
 };
 use sqlx::PgPool;
 
@@ -507,7 +507,7 @@ impl BmcEndpointExplorer {
         &self,
         bmc_ip_address: SocketAddr,
         credentials: Credentials,
-        mode: NicMode,
+        mode: BlueFieldOperatingMode,
     ) -> Result<(), EndpointExplorationError> {
         self.redfish_client
             .set_nic_mode(bmc_ip_address, credentials, mode.into_libredfish())
@@ -1123,7 +1123,7 @@ impl EndpointExplorer for BmcEndpointExplorer {
         &self,
         bmc_ip_address: SocketAddr,
         interface: &MachineInterfaceSnapshot,
-        mode: NicMode,
+        mode: BlueFieldOperatingMode,
     ) -> Result<(), EndpointExplorationError> {
         let bmc_mac_address = interface.mac_address;
 

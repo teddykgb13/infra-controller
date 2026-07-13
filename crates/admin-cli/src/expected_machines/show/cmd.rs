@@ -135,7 +135,7 @@ async fn convert_and_print_into_nice_table(
         "Pause On Ingestion",
         "DPF Enabled",
         "Disable Lockdown",
-        "DPU Mode",
+        "DPU Policy",
     ]);
 
     for expected_machine in &expected_machines.expected_machines {
@@ -157,16 +157,9 @@ async fn convert_and_print_into_nice_table(
 
         let labels = crate::metadata::fmt_labels_as_kv_pairs(expected_machine.metadata.as_ref());
 
-        // None on the wire == the DB default (`DpuMode`); fall back to that
-        // rather than `Unspecified` so `to_possible_value()` produces the
-        // same kebab-case string the `--dpu-mode` CLI flag accepts.
-        let dpu_mode_display = expected_machine
-            .dpu_mode
-            .and_then(|i| ::rpc::forge::DpuMode::try_from(i).ok())
-            .unwrap_or(::rpc::forge::DpuMode::DpuMode)
-            .to_possible_value()
-            .map(|pv| pv.get_name().to_owned())
-            .unwrap_or_default();
+        #[allow(deprecated)]
+        let dpu_policy_display =
+            dpu_policy_display(expected_machine.dpu_policy, expected_machine.dpu_mode);
 
         table.add_row(row![
             expected_machine.chassis_serial_number,
@@ -200,11 +193,100 @@ async fn convert_and_print_into_nice_table(
                 .and_then(|hlp| hlp.disable_lockdown)
                 .unwrap_or_default()
                 .to_string(),
-            dpu_mode_display,
+            dpu_policy_display,
         ]);
     }
 
     async_write!(output, "{}", table)?;
 
     Ok(())
+}
+
+/// Formats the canonical policy, falling back to the deprecated field for
+/// responses from older servers. Both protobuf sentinels mean `Manage`.
+fn dpu_policy_display(dpu_policy: Option<i32>, dpu_mode: Option<i32>) -> String {
+    let canonical = match dpu_policy {
+        Some(value) => match ::rpc::forge::HostDpuPolicy::try_from(value) {
+            Ok(::rpc::forge::HostDpuPolicy::Unspecified) => None,
+            Ok(policy) => Some(policy),
+            Err(_) => return format!("unknown ({value})"),
+        },
+        None => None,
+    };
+
+    canonical
+        .or_else(|| {
+            dpu_mode
+                .and_then(|value| ::rpc::forge::DpuMode::try_from(value).ok())
+                .map(::rpc::forge::HostDpuPolicy::from)
+                .filter(|policy| *policy != ::rpc::forge::HostDpuPolicy::Unspecified)
+        })
+        .unwrap_or(::rpc::forge::HostDpuPolicy::Manage)
+        .to_possible_value()
+        .map(|value| value.get_name().to_owned())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use carbide_test_support::value_scenarios;
+    use rpc::forge::{DpuMode, HostDpuPolicy};
+
+    use super::dpu_policy_display;
+
+    #[test]
+    fn dpu_policy_display_uses_canonical_policy_vocabulary() {
+        value_scenarios!(
+            run = |(dpu_policy, dpu_mode)| dpu_policy_display(dpu_policy, dpu_mode);
+            "both values missing defaults to manage" {
+                (None, None) => "manage".to_string(),
+            }
+
+            "both protobuf sentinels default to manage" {
+                (
+                    Some(HostDpuPolicy::Unspecified as i32),
+                    Some(DpuMode::Unspecified as i32),
+                ) => "manage".to_string(),
+            }
+
+            "canonical manage" {
+                (Some(HostDpuPolicy::Manage as i32), None) => "manage".to_string(),
+            }
+
+            "canonical use as NIC" {
+                (Some(HostDpuPolicy::UseAsNic as i32), None) => "use-as-nic".to_string(),
+            }
+
+            "canonical ignore" {
+                (Some(HostDpuPolicy::Ignore as i32), None) => "ignore".to_string(),
+            }
+
+            "canonical named value wins over conflicting legacy value" {
+                (
+                    Some(HostDpuPolicy::UseAsNic as i32),
+                    Some(DpuMode::NoDpu as i32),
+                ) => "use-as-nic".to_string(),
+            }
+
+            "canonical sentinel falls back to legacy value" {
+                (
+                    Some(HostDpuPolicy::Unspecified as i32),
+                    Some(DpuMode::NoDpu as i32),
+                ) => "ignore".to_string(),
+            }
+
+            "missing canonical value falls back to legacy value" {
+                (None, Some(DpuMode::NicMode as i32)) => "use-as-nic".to_string(),
+            }
+
+            "unknown canonical value remains authoritative" {
+                (Some(i32::MAX), Some(DpuMode::NoDpu as i32))
+                    => format!("unknown ({})", i32::MAX),
+            }
+
+            "unknown legacy value defaults to manage" {
+                (None, Some(i32::MAX)) => "manage".to_string(),
+            }
+        );
+    }
 }
