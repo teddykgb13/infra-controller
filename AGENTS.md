@@ -155,6 +155,11 @@ verification expectations.
 See [`STYLE_GUIDE.md`](STYLE_GUIDE.md) for detailed Rust coding conventions.
 Make sure to review it to ensure changes meet the expected style of the codebase.
 
+### Documentation
+
+Give every fenced code block a language identifier. Use `bash` or `sh` for
+shell commands and `text` for command output or other unformatted examples.
+
 ### Avoid stringly-typed values
 
 When a value has a known, finite set of possibilities, model it with an enum (or
