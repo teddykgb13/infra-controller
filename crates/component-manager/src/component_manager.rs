@@ -9,7 +9,7 @@ use carbide_redfish::libredfish::RedfishClientPool;
 use carbide_secrets::credentials::{CredentialManager, Credentials};
 use carbide_uuid::rack::RackId;
 use carbide_uuid::switch::SwitchId;
-use db::WithTransaction;
+use db::{ObjectColumnFilter, WithTransaction};
 use librms::RmsApi;
 use model::rack::{MaintenanceActivity, MaintenanceScope, RackState};
 use model::rack_type::RackProfileConfig;
@@ -57,13 +57,13 @@ pub struct SwitchMaintenanceRequestResult {
 
 /// Which rack states a maintenance caller is willing to schedule from.
 ///
-/// Automatic maintenance uses [`ReadyOnly`](Self::ReadyOnly), while the
+/// Automatic maintenance uses [`RequireReady`](Self::RequireReady), while the
 /// operator-facing API retains its existing ability to recover racks in
-/// `Error` via [`ReadyOrError`](Self::ReadyOrError).
+/// `Error` via [`AllowErrorRecovery`](Self::AllowErrorRecovery).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RackMaintenanceEligibility {
-    ReadyOnly,
-    ReadyOrError,
+    RequireReady,
+    AllowErrorRecovery,
 }
 
 /// The complete, non-error result of attempting to schedule rack maintenance.
@@ -115,14 +115,25 @@ pub async fn request_rack_maintenance_via_state_controller(
     let result = db_pool
         .with_txn(|txn| {
             Box::pin(async move {
-                let rack = db::rack::find_by_id_for_update(txn.as_mut(), &transaction_rack_id)
+                if !db::rack::lock_for_update(txn.as_mut(), &transaction_rack_id)
                     .await
                     .map_err(|error| ComponentManagerError::Internal(error.to_string()))?
-                    .ok_or_else(|| {
-                        ComponentManagerError::NotFound(format!(
-                            "rack {transaction_rack_id} not found"
-                        ))
-                    })?;
+                {
+                    return Err(ComponentManagerError::NotFound(format!(
+                        "rack {transaction_rack_id} not found"
+                    )));
+                }
+                let rack = db::rack::find_by(
+                    txn.as_mut(),
+                    ObjectColumnFilter::One(db::rack::IdColumn, &transaction_rack_id),
+                )
+                .await
+                .map_err(|error| ComponentManagerError::Internal(error.to_string()))?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    ComponentManagerError::NotFound(format!("rack {transaction_rack_id} not found"))
+                })?;
 
                 if let Some(existing_scope) = rack.config.maintenance_requested.as_ref() {
                     return Ok(if existing_scope == &scope {
@@ -134,8 +145,8 @@ pub async fn request_rack_maintenance_via_state_controller(
 
                 let state = rack.controller_state.value.clone();
                 let eligible = match eligibility {
-                    RackMaintenanceEligibility::ReadyOnly => state == RackState::Ready,
-                    RackMaintenanceEligibility::ReadyOrError => {
+                    RackMaintenanceEligibility::RequireReady => state == RackState::Ready,
+                    RackMaintenanceEligibility::AllowErrorRecovery => {
                         matches!(&state, RackState::Ready | RackState::Error { .. })
                     }
                 };
@@ -223,9 +234,20 @@ async fn recover_rack_maintenance_after_credential_failure(
     let result = db_pool
         .with_txn(|txn| {
             Box::pin(async move {
-                let Some(mut rack) = db::rack::find_by_id_for_update(txn.as_mut(), &rack_id)
+                if !db::rack::lock_for_update(txn.as_mut(), &rack_id)
                     .await
                     .map_err(|error| ComponentManagerError::Internal(error.to_string()))?
+                {
+                    return Ok(RackMaintenanceCredentialRecovery::RackNotFound);
+                }
+                let Some(mut rack) = db::rack::find_by(
+                    txn.as_mut(),
+                    ObjectColumnFilter::One(db::rack::IdColumn, &rack_id),
+                )
+                .await
+                .map_err(|error| ComponentManagerError::Internal(error.to_string()))?
+                .into_iter()
+                .next()
                 else {
                     return Ok(RackMaintenanceCredentialRecovery::RackNotFound);
                 };
@@ -609,7 +631,7 @@ mod tests {
                 &pool,
                 &ready_rack,
                 scope.clone(),
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await
@@ -645,7 +667,7 @@ mod tests {
                 &pool,
                 &ready_rack,
                 scope.clone(),
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await
@@ -662,7 +684,7 @@ mod tests {
                 &pool,
                 &ready_rack,
                 unrelated_scope,
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await
@@ -688,7 +710,7 @@ mod tests {
                 &pool,
                 &error_rack,
                 nmx_scope(),
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await
@@ -700,7 +722,7 @@ mod tests {
                 &pool,
                 &error_rack,
                 nmx_scope(),
-                RackMaintenanceEligibility::ReadyOrError,
+                RackMaintenanceEligibility::AllowErrorRecovery,
                 None,
             )
             .await
@@ -733,7 +755,7 @@ mod tests {
                 &pool,
                 &race_rack,
                 first_scope,
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 Some(RackMaintenanceAccessToken {
                     credential_manager: &credential_manager,
                     token: "first-token".into(),
@@ -743,7 +765,7 @@ mod tests {
                 &pool,
                 &race_rack,
                 second_scope,
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 Some(RackMaintenanceAccessToken {
                     credential_manager: &credential_manager,
                     token: "second-token".into(),
@@ -804,7 +826,7 @@ mod tests {
                 &pool,
                 &firmware_rack,
                 firmware_scope,
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await
@@ -830,7 +852,7 @@ mod tests {
                 &pool,
                 &deleted_rack,
                 nmx_scope(),
-                RackMaintenanceEligibility::ReadyOnly,
+                RackMaintenanceEligibility::RequireReady,
                 None,
             )
             .await,
@@ -852,7 +874,7 @@ mod tests {
             &pool,
             &credential_failure_rack,
             credential_failure_scope,
-            RackMaintenanceEligibility::ReadyOnly,
+            RackMaintenanceEligibility::RequireReady,
             Some(RackMaintenanceAccessToken {
                 credential_manager: &FailingCredentialManager,
                 token: "test-token".into(),
