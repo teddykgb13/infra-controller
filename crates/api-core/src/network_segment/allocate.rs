@@ -47,6 +47,7 @@ fn u128_to_ip(val: u128, is_v6: bool) -> IpAddr {
 
 /// wrap_to_prefix_start returns `addr` if it falls within the VPC prefix,
 /// otherwise wraps around to the start of the VPC prefix.
+#[cfg(test)]
 fn wrap_to_prefix_start(addr: IpAddr, vpc_prefix: &IpNetwork) -> IpAddr {
     let addr_u128 = ip_to_u128(addr);
     let network_u128 = ip_to_u128(vpc_prefix.network());
@@ -76,6 +77,7 @@ pub struct PrefixAllocator {
 /// given prefix length within a parent VPC prefix, using u128 arithmetic
 /// for both IPv4 and IPv6.
 #[derive(Debug)]
+#[cfg(test)]
 struct PrefixIterator {
     vpc_prefix: IpNetwork,
     prefix: u8,
@@ -92,7 +94,47 @@ fn networks_overlap(a: IpNetwork, b: IpNetwork) -> bool {
     a.contains(b.network()) || b.contains(a.network())
 }
 
+/// Returns the number of leading endpoints reserved on a generated linknet.
+///
+/// IPv4 reserves its DPU endpoint through the explicit gateway. IPv6 cannot
+/// persist a gateway, so reserve `::0` explicitly and allocate `::1` to the
+/// instance.
+fn generated_linknet_num_reserved(prefix: IpNetwork) -> i32 {
+    if prefix.is_ipv6() { 1 } else { 0 }
+}
+
+/// Finds the first unoccupied linknet index in an inclusive search range.
+///
+/// `occupied` must be sorted by its inclusive start index. Overlapping ranges
+/// need not be merged because advancing past each range is monotonic.
+fn first_unoccupied_index(
+    occupied: &[(u128, u128)],
+    range_start: u128,
+    range_end: u128,
+) -> Option<u128> {
+    if range_start > range_end {
+        return None;
+    }
+
+    let mut candidate = range_start;
+    for &(occupied_start, occupied_end) in occupied {
+        if occupied_end < candidate {
+            continue;
+        }
+        if occupied_start > candidate {
+            return Some(candidate);
+        }
+
+        candidate = occupied_end.saturating_add(1);
+        if candidate > range_end {
+            return None;
+        }
+    }
+    Some(candidate)
+}
+
 impl PrefixAllocator {
+    #[cfg(test)]
     fn iter(&self) -> PrefixIterator {
         let is_v6 = self.vpc_prefix.is_ipv6();
 
@@ -147,8 +189,8 @@ impl PrefixAllocator {
         })
     }
 
-    // As of now this is only used by FNN.
-    pub async fn allocate_network_segment(
+    #[cfg(test)]
+    pub(crate) async fn allocate_network_segment(
         &self,
         txn: &mut PgConnection,
         vpc_id: VpcId,
@@ -161,6 +203,18 @@ impl PrefixAllocator {
             self.next_free_prefix(txn).await?
         };
 
+        self.allocate_network_segment_for_prefix(txn, vpc_id, prefix)
+            .await
+    }
+
+    /// Creates a generated segment for a prefix already selected and validated
+    /// by this allocator's caller.
+    pub(crate) async fn allocate_network_segment_for_prefix(
+        &self,
+        txn: &mut PgConnection,
+        vpc_id: VpcId,
+        prefix: IpNetwork,
+    ) -> CarbideResult<(NetworkSegmentId, IpNetwork)> {
         let name = format!("vpc_prefix_{}", prefix.network());
         let segment_id = NetworkSegmentId::new();
 
@@ -183,7 +237,7 @@ impl PrefixAllocator {
                 prefix,
                 gateway,
                 dhcpv6_link_address: None,
-                num_reserved: 0,
+                num_reserved: generated_linknet_num_reserved(prefix),
             }],
             vlan_id: None,
             vni: None,
@@ -211,23 +265,14 @@ impl PrefixAllocator {
         Ok((segment.id, prefix))
     }
 
-    /// Allocates a new linknet prefix from this VPC prefix and adds it to an existing
-    /// network segment. Used for dual-stack: the first prefix creates the segment via
-    /// `allocate_network_segment()`, and subsequent prefixes (e.g. the IPv6 counterpart)
-    /// are added to the same segment via this method.
-    pub async fn allocate_linknet_for_segment(
+    /// Attaches a prefix already selected and validated by this allocator's
+    /// caller to an existing generated segment.
+    pub(crate) async fn allocate_linknet_for_segment_with_prefix(
         &self,
         txn: &mut PgConnection,
         segment_id: NetworkSegmentId,
-        requested_prefix: Option<IpNetwork>,
+        prefix: IpNetwork,
     ) -> CarbideResult<IpNetwork> {
-        let prefix = if let Some(requested_prefix) = requested_prefix {
-            self.validate_desired_prefix(txn, requested_prefix).await?;
-            requested_prefix
-        } else {
-            self.next_free_prefix(txn).await?
-        };
-
         // IPv6 gateways are None (uses Router Advertisements).
         let gateway = if prefix.is_ipv4() {
             Some(prefix.network())
@@ -242,7 +287,7 @@ impl PrefixAllocator {
                 prefix,
                 gateway,
                 dhcpv6_link_address: None,
-                num_reserved: 0,
+                num_reserved: generated_linknet_num_reserved(prefix),
             }],
         )
         .await?;
@@ -255,6 +300,10 @@ impl PrefixAllocator {
         Ok(prefix)
     }
 
+    /// Returns the next unoccupied child prefix using the persisted next-fit cursor.
+    ///
+    /// Occupied ranges are searched as linknet-index intervals so broad IPv6
+    /// allocations do not require enumerating their constituent /127 prefixes.
     pub async fn next_free_prefix(&self, txn: &mut PgConnection) -> CarbideResult<IpNetwork> {
         let vpc_str = self.vpc_prefix.to_string();
         let used_prefixes = db::network_prefix::containing_prefix(txn, vpc_str.as_str())
@@ -264,30 +313,84 @@ impl PrefixAllocator {
             .collect_vec();
 
         // Reminder that `new()` already validated self.prefix > self.vpc_prefix.prefix().
-        let total_network_possible: u128 = 1u128 << (self.prefix - self.vpc_prefix.prefix()) as u32;
-        let mut current_iteration: u128 = 0;
-        let mut allocator_itr = self.iter();
+        let prefix_delta = u32::from(self.prefix - self.vpc_prefix.prefix());
+        let total_network_possible = 1u128.checked_shl(prefix_delta).ok_or_else(|| {
+            CarbideError::internal(format!(
+                "unable to represent the number of /{} linknets in VPC prefix {}",
+                self.prefix, self.vpc_prefix
+            ))
+        })?;
+        let max_bits = u32::from(self.vpc_prefix.address_family().interface_prefix_len());
+        let host_bits = max_bits - u32::from(self.prefix);
+        let linknet_size = 1u128.checked_shl(host_bits).ok_or_else(|| {
+            CarbideError::internal(format!(
+                "unable to represent a /{} linknet address range",
+                self.prefix
+            ))
+        })?;
+        let vpc_start = ip_to_u128(self.vpc_prefix.network());
+        let vpc_end = ip_to_u128(self.vpc_prefix.broadcast());
+        let is_ipv6 = self.vpc_prefix.is_ipv6();
 
-        loop {
-            let Some(next_address) = allocator_itr.next() else {
-                return Err(CarbideError::internal("Prefix exhausted.".to_string()));
-            };
+        // Convert every overlapping network prefix into the inclusive range of
+        // linknet indexes that it occupies. This avoids enumerating enormous
+        // IPv6 spaces one /127 at a time when, for example, an existing /64
+        // covers 2^63 possible linknets inside a /48 VPC prefix.
+        let mut occupied = used_prefixes
+            .into_iter()
+            .filter(|prefix| prefix.is_ipv6() == is_ipv6)
+            .map(|prefix| {
+                let occupied_start = ip_to_u128(prefix.network()).max(vpc_start);
+                let occupied_end = ip_to_u128(prefix.broadcast()).min(vpc_end);
+                (
+                    (occupied_start - vpc_start) / linknet_size,
+                    (occupied_end - vpc_start) / linknet_size,
+                )
+            })
+            .collect_vec();
+        occupied.sort_unstable();
 
-            if !used_prefixes
-                .iter()
-                .any(|x| networks_overlap(*x, next_address))
-            {
-                return Ok(next_address);
-            }
+        // Preserve next-fit cursor semantics. An absent or out-of-range cursor
+        // starts at the parent prefix; the last linknet wraps to index zero.
+        let start_index = self
+            .last_used_prefix
+            .filter(|prefix| prefix.is_ipv6() == is_ipv6)
+            .and_then(|prefix| {
+                let prefix_end = ip_to_u128(prefix.broadcast());
+                (vpc_start..=vpc_end)
+                    .contains(&prefix_end)
+                    .then(|| ((prefix_end - vpc_start) / linknet_size + 1) % total_network_possible)
+            })
+            .unwrap_or_default();
 
-            if current_iteration > total_network_possible {
-                return Err(CarbideError::internal(format!(
-                    "IP address exhausted: {}",
+        let free_index = first_unoccupied_index(&occupied, start_index, total_network_possible - 1)
+            .or_else(|| {
+                start_index
+                    .checked_sub(1)
+                    .and_then(|range_end| first_unoccupied_index(&occupied, 0, range_end))
+            })
+            .ok_or_else(|| {
+                CarbideError::ResourceExhausted(format!(
+                    "VPC prefix {} ({}) has no available /{} linknets",
+                    self.vpc_prefix_id, self.vpc_prefix, self.prefix
+                ))
+            })?;
+
+        let address = free_index
+            .checked_mul(linknet_size)
+            .and_then(|offset| vpc_start.checked_add(offset))
+            .ok_or_else(|| {
+                CarbideError::internal(format!(
+                    "allocated linknet index {free_index} overflowed VPC prefix {}",
                     self.vpc_prefix
-                )));
-            }
-            current_iteration += 1;
-        }
+                ))
+            })?;
+        IpNetwork::new(u128_to_ip(address, is_ipv6), self.prefix).map_err(|error| {
+            CarbideError::internal(format!(
+                "unable to construct allocated linknet in VPC prefix {}: {error}",
+                self.vpc_prefix
+            ))
+        })
     }
 
     pub async fn validate_desired_prefix(
@@ -326,6 +429,7 @@ impl PrefixAllocator {
 /// PrefixIterator is only constructed by `PrefixAllocator::iter`, which
 /// guarantees that `self.prefix` is a valid prefix length for the address
 /// family, meaning the `IpNetwork::new(...).unwrap()` calls below are safe.
+#[cfg(test)]
 impl Iterator for PrefixIterator {
     type Item = IpNetwork;
 
@@ -363,7 +467,29 @@ mod test {
 
     use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 
-    use crate::network_segment::allocate::PrefixAllocator;
+    use crate::network_segment::allocate::{PrefixAllocator, first_unoccupied_index};
+
+    /// Exercises interval lookup without enumerating every possible linknet.
+    #[test]
+    fn find_first_unoccupied_linknet_index() {
+        // These cases cover gaps, overlapping occupied ranges, and complete
+        // exhaustion without constructing an address space proportional to IPv6.
+        let cases = [
+            ("empty", vec![], 0, 7, Some(0)),
+            ("leading occupied", vec![(0, 3)], 0, 7, Some(4)),
+            ("overlapping occupied", vec![(0, 3), (2, 6)], 0, 7, Some(7)),
+            ("gap", vec![(0, 1), (4, 7)], 0, 7, Some(2)),
+            ("exhausted", vec![(0, 7)], 0, 7, None),
+        ];
+
+        for (name, occupied, range_start, range_end, expected) in cases {
+            assert_eq!(
+                first_unoccupied_index(&occupied, range_start, range_end),
+                expected,
+                "case: {name}",
+            );
+        }
+    }
 
     #[test]
     fn test_next_iter() {

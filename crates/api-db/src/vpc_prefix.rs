@@ -128,30 +128,82 @@ where
     Ok(container)
 }
 
-// Get a list of prefixes matching a filter on the ID column with ROW based lock.
-pub async fn get_by_id_with_row_lock(
+/// Loads explicit VPC-prefix selections for allocation validation.
+///
+/// Deleted rows are deliberately included so the caller can distinguish an
+/// unknown prefix from one that became unavailable through soft deletion.
+/// This discovery query does not lock rows; allocation locks one candidate at
+/// a time through [`lock_for_allocation`].
+pub async fn get_for_allocation_by_ids(
     txn: &mut PgConnection,
-    filter: &[VpcPrefixId],
+    vpc_prefix_ids: &[VpcPrefixId],
 ) -> Result<Vec<VpcPrefix>, DatabaseError> {
-    let query = "SELECT * FROM network_vpc_prefixes WHERE id=ANY($1) FOR NO KEY UPDATE";
-    let mut container: Vec<VpcPrefix> = sqlx::query_as(query)
-        .bind(filter)
+    let query = r#"
+        SELECT *
+        FROM network_vpc_prefixes
+        WHERE id = ANY($1)
+        -- Include deleted rows so allocation validation can report them precisely.
+        ORDER BY id
+    "#;
+    sqlx::query_as(query)
+        .bind(vpc_prefix_ids)
         .fetch_all(&mut *txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))
+}
 
-    if let Some(vpc_prefix) = container
-        .iter()
-        .find(|prefix| prefix.is_marked_as_deleted())
-    {
-        return Err(DatabaseError::InvalidArgument(format!(
-            "VPC prefix {} is marked for deletion and cannot be used for allocation",
-            vpc_prefix.id
-        )));
-    }
+/// Loads active automatic-allocation candidates for the requested VPCs.
+///
+/// The `(vpc_id, id)` ordering is part of the allocator's cross-transaction
+/// lock protocol. Callers must freeze this result for the outer transaction
+/// rather than refreshing or re-ranking it using mutable capacity statistics.
+pub async fn find_allocation_candidates(
+    txn: &mut PgConnection,
+    vpc_ids: &[VpcId],
+) -> Result<Vec<VpcPrefix>, DatabaseError> {
+    let query = r#"
+        SELECT *
+        FROM network_vpc_prefixes
+        WHERE vpc_id = ANY($1)
+          AND deleted IS NULL
+          -- Soft-deleted prefixes are not eligible automatic candidates.
+          AND (
+            (family(prefix) = 4 AND masklen(prefix) < 31)
+            OR (family(prefix) = 6 AND masklen(prefix) < 127)
+          )
+          -- A parent must be wider than the generated /31 or /127 linknet.
+        ORDER BY vpc_id, id
+        -- Stable ID order defines the allocator's prefix-row lock order.
+    "#;
+    sqlx::query_as(query)
+        .bind(vpc_ids)
+        .fetch_all(&mut *txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))
+}
 
-    update_stats(&mut container, txn).await?;
-    Ok(container)
+/// Locks and re-reads one allocation candidate.
+///
+/// Returning `None` means the prefix was deleted after candidate discovery.
+/// A successful savepoint retains this row lock in the containing transaction.
+pub async fn lock_for_allocation(
+    txn: &mut PgConnection,
+    vpc_prefix_id: VpcPrefixId,
+) -> Result<Option<VpcPrefix>, DatabaseError> {
+    let query = r#"
+        SELECT *
+        FROM network_vpc_prefixes
+        WHERE id = $1
+          AND deleted IS NULL
+          -- Re-check deletion while acquiring the selected candidate lock.
+        FOR NO KEY UPDATE
+        -- Serialize allocation through this candidate's cursor.
+    "#;
+    sqlx::query_as(query)
+        .bind(vpc_prefix_id)
+        .fetch_optional(txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))
 }
 
 // Find the prefixes associated with a VPC.
