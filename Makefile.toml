@@ -579,6 +579,7 @@ dependencies = [
   "carbide-lints",
   "check-format-nightly",
   "check-workspace-deps",
+  "check-metric-docs",
   "check-licenses",
   "check-bans",
 ]
@@ -817,6 +818,11 @@ description = "Check Cargo.toml files for dependency versions declared in crates
 script = [
   "cargo --quiet xtask check-workspace-deps || (RC=$?; echo 'To fix automatically, run `cargo xtask check-workspace-deps --fix`'; exit $RC)",
 ]
+
+[tasks.check-metric-docs]
+workspace = false
+description = "Fail if a #[derive(Event)] counter/histogram is missing a row in docs/observability/core_metrics.md"
+script = ["cargo --quiet xtask check-metric-docs"]
 
 [tasks.check-isolated-package-builds]
 workspace = false

@@ -46,6 +46,7 @@ fn both_sides_from_one_emit() {
         component = "matrix-test",
         log = warn,
         metric = counter,
+        describe_unchecked,
         message = "matrix both fired"
     )]
     struct BothSides {
@@ -92,7 +93,8 @@ fn metric_only_writes_no_log() {
         name = "carbide_test_matrix_quiet_total",
         component = "matrix-test",
         log = off,
-        metric = counter
+        metric = counter,
+        describe_unchecked
     )]
     struct Quiet {
         #[label]
@@ -208,7 +210,8 @@ fn unit_struct_and_declared_knobs() {
         name = "carbide_test_matrix_unit_total",
         component = "matrix-test",
         log = off,
-        metric = counter
+        metric = counter,
+        describe_unchecked
     )]
     struct Tick;
 
@@ -235,6 +238,7 @@ fn per_instance_log_at_override() {
         component = "matrix-test",
         log = dynamic,
         metric = counter,
+        describe_unchecked,
         message = "call finished"
     )]
     struct CallFinished {

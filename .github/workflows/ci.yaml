@@ -1352,6 +1352,9 @@ jobs:
       - name: Check workspace deps
         run: cargo xtask check-workspace-deps
 
+      - name: Check metric docs
+        run: cargo xtask check-metric-docs
+
       - name: Check licenses
         run: cargo make --no-workspace check-licenses
 

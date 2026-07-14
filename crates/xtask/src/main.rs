@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 mod isolated_package_builds;
+mod metric_docs;
 mod squash_migrations;
 mod workspace_deps;
 
@@ -33,6 +34,11 @@ enum Xtask {
         about = "Check that each workspace package builds independently with its default features"
     )]
     IsolatedPackageBuilds,
+    #[clap(
+        name = "check-metric-docs",
+        about = "Check that every #[derive(Event)] counter/histogram has a row in docs/observability/core_metrics.md"
+    )]
+    CheckMetricDocs,
     #[clap(
         name = "squash-migrations",
         about = "Create a single squashed migration from all existing migrations in crates/api-db/migrations"
@@ -57,6 +63,7 @@ async fn main() -> eyre::Result<()> {
             workspace_deps::check(fix)?.report_and_exit()
         }
         Xtask::IsolatedPackageBuilds => isolated_package_builds::check()?,
+        Xtask::CheckMetricDocs => metric_docs::check()?,
         Xtask::SquashMigrations(args) => squash_migrations::run(args).await?,
     }
     Ok(())

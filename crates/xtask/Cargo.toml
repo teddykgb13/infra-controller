@@ -29,6 +29,8 @@ clap = { workspace = true }
 cargo_metadata = { workspace = true }
 similar = { workspace = true }
 version-compare = { workspace = true }
+syn = { workspace = true, features = ["full", "parsing"] }
+proc-macro2 = { workspace = true, features = ["proc-macro"] }
 
 chrono = { workspace = true }
 tracing = { workspace = true }
