@@ -75,12 +75,27 @@ impl Default for CarbideDhcpContext {
         Self {
             api_endpoint: "https://[::1]:1079".to_string(),
             nameservers: vec![Ipv4Addr::new(1, 1, 1, 1)],
-            forge_root_ca_path: std::env::var("FORGE_ROOT_CAFILE_PATH")
-                .unwrap_or_else(|_| tls_default::ROOT_CA.to_string()),
-            forge_client_cert_path: std::env::var("FORGE_CLIENT_CERT_PATH")
-                .unwrap_or_else(|_| tls_default::CLIENT_CERT.to_string()),
-            forge_client_key_path: std::env::var("FORGE_CLIENT_KEY_PATH")
-                .unwrap_or_else(|_| tls_default::CLIENT_KEY.to_string()),
+            forge_root_ca_path: std::env::var("FORGE_ROOT_CAFILE_PATH").unwrap_or_else(|e| {
+                log::warn!(
+                    "FORGE_ROOT_CAFILE_PATH unset or unreadable ({e}); falling back to the built-in default root CA at {}",
+                    tls_default::ROOT_CA
+                );
+                tls_default::ROOT_CA.to_string()
+            }),
+            forge_client_cert_path: std::env::var("FORGE_CLIENT_CERT_PATH").unwrap_or_else(|e| {
+                log::warn!(
+                    "FORGE_CLIENT_CERT_PATH unset or unreadable ({e}); falling back to the built-in default client certificate at {}",
+                    tls_default::CLIENT_CERT
+                );
+                tls_default::CLIENT_CERT.to_string()
+            }),
+            forge_client_key_path: std::env::var("FORGE_CLIENT_KEY_PATH").unwrap_or_else(|e| {
+                log::warn!(
+                    "FORGE_CLIENT_KEY_PATH unset or unreadable ({e}); falling back to the built-in default client key at {}",
+                    tls_default::CLIENT_KEY
+                );
+                tls_default::CLIENT_KEY.to_string()
+            }),
             ntpservers: vec![
                 Ipv4Addr::new(172, 20, 0, 24),
                 Ipv4Addr::new(172, 20, 0, 26),
