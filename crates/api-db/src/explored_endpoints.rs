@@ -401,15 +401,32 @@ WHERE address=$4 AND version=$5";
     Ok(query_result.rows_affected() > 0)
 }
 
-/// clear_last_known_error clears the last known error in explored_endpoints for the BMC identified by IP
+/// Clears the last known error in `explored_endpoints` for the BMC identified by IP.
+///
+/// Lock the endpoint while reading its report so a concurrent exploration
+/// update either commits first and is preserved, or loses its optimistic update
+/// after this clear commits.
 pub async fn clear_last_known_error(
     address: IpAddr,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    for row in find_all_by_ip(address, txn).await? {
-        let mut report = row.report;
-        report.last_exploration_error = None;
-        try_update(address, row.report_version, &report, true, txn).await?;
+    let query = "SELECT * FROM explored_endpoints WHERE address = $1 FOR UPDATE";
+    let Some(row) = sqlx::query_as::<_, DbExploredEndpoint>(query)
+        .bind(address)
+        .fetch_optional(&mut *txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?
+    else {
+        return Ok(());
+    };
+
+    let mut report = row.report;
+    report.last_exploration_error = None;
+    if !try_update(address, row.report_version, &report, true, txn).await? {
+        return Err(DatabaseError::ConcurrentModificationError(
+            "ExploredEndpoint",
+            row.report_version.version_string(),
+        ));
     }
 
     Ok(())

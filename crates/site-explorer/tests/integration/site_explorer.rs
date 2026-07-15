@@ -2158,6 +2158,47 @@ async fn test_site_explorer_clear_last_known_error(
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes.first().unwrap().report.last_exploration_error, None);
 
+    // Exercise the inverse race: an exploration write acquires the row lock
+    // first. The clear must wait for that write to commit, then clear the error
+    // from the freshly persisted report.
+    let version_before_race = nodes.first().unwrap().report_version;
+    let mut exploration_txn = db::Transaction::begin(&env.pool).await?;
+    let exploration_write_applied = db::explored_endpoints::try_update_last_exploration_error(
+        bmc_ip,
+        version_before_race,
+        &EndpointExplorationError::AvoidLockout,
+        Duration::from_secs(2),
+        &mut exploration_txn,
+    )
+    .await?;
+    assert!(exploration_write_applied);
+
+    let mut clear_txn = db::Transaction::begin(&env.pool).await?;
+    {
+        let clear = db::explored_endpoints::clear_last_known_error(bmc_ip, &mut clear_txn);
+        tokio::pin!(clear);
+        tokio::select! {
+            result = &mut clear => {
+                panic!("clear unexpectedly completed while the exploration write held the row lock: {result:?}");
+            }
+            () = tokio::time::sleep(Duration::from_millis(100)) => {}
+        }
+
+        exploration_txn.commit().await?;
+        clear.await?;
+    }
+    clear_txn.commit().await?;
+
+    let mut txn = env.pool.begin().await?;
+    let nodes = db::explored_endpoints::find_all_by_ip(bmc_ip, &mut txn).await?;
+    txn.commit().await?;
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(
+        nodes.first().unwrap().report.last_exploration_error,
+        None,
+        "the clear must retry after the exploration write wins the race"
+    );
+
     Ok(())
 }
 
