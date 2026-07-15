@@ -29,8 +29,9 @@ use bmc_mock::mac_address_pool::{
     RangesConfig as MacAddressRangesConfig,
 };
 use bmc_mock::{
-    BmcCommand, Callbacks, DpuMachineInfo, DpuSettings, HostHardwareType, HostMachineInfo,
-    ListenerOrAddress, MachineInfo, MockPowerState, SetSystemPowerError, SystemPowerControl,
+    BmcCommand, BmcState, Callbacks, DpuMachineInfo, DpuSettings, HostHardwareType,
+    HostMachineInfo, ListenerOrAddress, MachineInfo, MockPowerState, SetSystemPowerError,
+    SystemPowerControl,
 };
 use mac_address::MacAddress;
 use tar_router::TarGzOption;
@@ -70,6 +71,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tar_router_entries = HashMap::default();
 
     let args = command_line::parse_args();
+    if args.enable_ipmi_simulation && (args.targz.is_some() || args.ip_router.is_some()) {
+        return Err(
+            "--enable-ipmi-simulation cannot be combined with archive-backed routers".into(),
+        );
+    }
     if let Some(ip_routers) = args.ip_router {
         for ip_router in ip_routers {
             info!(
@@ -88,12 +94,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listen_addr = args.port.map(|p| SocketAddr::from(([0, 0, 0, 0], p)));
     info!("Using cert_path: {:?}", args.cert_path);
-    let router = if let Some(tar_path) = args.targz {
+    let (router, generated_state) = if let Some(tar_path) = args.targz {
         info!("Using archive {} as default", tar_path.to_string_lossy());
-        tar_router::tar_router(TarGzOption::Disk(&tar_path), Some(&mut tar_router_entries)).unwrap()
+        (
+            tar_router::tar_router(TarGzOption::Disk(&tar_path), Some(&mut tar_router_entries))
+                .unwrap(),
+            None,
+        )
     } else {
         info!("Using default BMC mock");
-        default_host_mock()
+        let (router, state) = default_host_mock();
+        (router, Some(state))
+    };
+
+    let _ipmi_sim_handle = if args.enable_ipmi_simulation {
+        let state = generated_state
+            .as_ref()
+            .expect("archive-backed routers were rejected above");
+        Some(
+            bmc_mock::ipmi_sim::start(
+                state,
+                bmc_mock::ipmi_sim::IpmiSimConfig {
+                    bind_ip: "0.0.0.0".parse().unwrap(),
+                    stable_id: "standalone-bmc-mock".to_string(),
+                    console_prompt: "root@bmc-mock # ".to_string(),
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
     };
 
     routers_by_ip.insert("".to_owned(), router);
@@ -157,7 +187,7 @@ fn spawn_qemu_reboot_handler() -> mpsc::UnboundedSender<BmcCommand> {
     command_tx
 }
 
-fn default_host_mock() -> Router {
+fn default_host_mock() -> (Router, BmcState) {
     let command_channel = spawn_qemu_reboot_handler();
     let callbacks = Arc::new(ChannelCallbacks::new(command_channel));
     let mut pool = MacAddressPool::new(MacAddressConfig {
@@ -184,7 +214,7 @@ fn default_host_mock() -> Router {
         &mut pool,
         mac_range,
     ));
-    bmc_mock::machine_router(&machine_info, callbacks, String::default(), false).0
+    bmc_mock::machine_router(&machine_info, callbacks, String::default(), false)
 }
 
 #[derive(Debug)]
