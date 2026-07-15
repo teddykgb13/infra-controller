@@ -2086,6 +2086,9 @@ async fn test_site_explorer_reexplore(pool: PgPool) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+// This regression intentionally keeps the exploration transaction open while
+// awaiting the competing clear, so it can verify both row-lock orderings.
+#[allow(txn_held_across_await)]
 #[sqlx_test]
 async fn test_site_explorer_clear_last_known_error(
     pool: PgPool,
