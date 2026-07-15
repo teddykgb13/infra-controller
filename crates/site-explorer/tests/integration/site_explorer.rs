@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bmc_explorer::test_support::generate_managed_host_reports;
 use bmc_mock::HostHardwareType;
@@ -2092,8 +2093,10 @@ async fn test_site_explorer_clear_last_known_error(
     let env = Env::new(pool).await;
     let ip_address = "192.168.1.1";
     let bmc_ip: IpAddr = IpAddr::from_str(ip_address)?;
-    let last_error = Some(EndpointExplorationError::Unreachable {
-        details: Some("test_unreachable_detail".to_string()),
+    let last_error = Some(EndpointExplorationError::Unauthorized {
+        details: "Not authorized".to_string(),
+        response_body: None,
+        response_code: Some(401),
     });
 
     let mut dpu_report1: EndpointExplorationReport = DpuConfig {
@@ -2111,8 +2114,9 @@ async fn test_site_explorer_clear_last_known_error(
     let nodes = db::explored_endpoints::find_all_by_ip(bmc_ip, &mut txn).await?;
     txn.commit().await?;
     assert_eq!(nodes.len(), 1);
-    let node = nodes.first();
-    assert_eq!(node.unwrap().report.last_exploration_error, last_error);
+    let node = nodes.first().unwrap();
+    assert_eq!(node.report.last_exploration_error, last_error);
+    let old_version = node.report_version;
 
     env.api()
         .clear_site_exploration_error(Request::new(rpc::forge::ClearSiteExplorationErrorRequest {
@@ -2126,8 +2130,33 @@ async fn test_site_explorer_clear_last_known_error(
     let nodes = db::explored_endpoints::find_all_by_ip(bmc_ip, &mut txn).await?;
     txn.commit().await?;
     assert_eq!(nodes.len(), 1);
-    let node = nodes.first();
-    assert_eq!(node.unwrap().report.last_exploration_error, None);
+    let node = nodes.first().unwrap();
+    assert_eq!(node.report.last_exploration_error, None);
+    assert_eq!(
+        node.report_version.version_nr(),
+        old_version.version_nr() + 1
+    );
+
+    let mut txn = db::Transaction::begin(&env.pool).await?;
+    let stale_write_applied = db::explored_endpoints::try_update_last_exploration_error(
+        bmc_ip,
+        old_version,
+        &EndpointExplorationError::AvoidLockout,
+        Duration::from_secs(1),
+        &mut txn,
+    )
+    .await?;
+    txn.commit().await?;
+    assert!(
+        !stale_write_applied,
+        "a stale exploration result must not overwrite a cleared error"
+    );
+
+    let mut txn = env.pool.begin().await?;
+    let nodes = db::explored_endpoints::find_all_by_ip(bmc_ip, &mut txn).await?;
+    txn.commit().await?;
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes.first().unwrap().report.last_exploration_error, None);
 
     Ok(())
 }
